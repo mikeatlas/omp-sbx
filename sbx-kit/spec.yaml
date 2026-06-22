@@ -1,0 +1,59 @@
+schemaVersion: "1"
+kind: sandbox
+name: omp
+displayName: OMP
+description: The omp coding agent (oh-my-pi) — runs inside a Docker sbx sandbox.
+
+sandbox:
+  image: "omp-sbx:latest"
+  aiFilename: AGENTS.md
+  entrypoint:
+    run: [omp]
+commands:
+  startup:
+    - command: ["bash", "-c", "OMP_HOST=$(find /Users -maxdepth 2 -name .omp -type d 2>/dev/null | head -1); [ -n \"$OMP_HOST\" ] && ln -sf \"$OMP_HOST\" \"$HOME/.omp\" || true"]
+      user: "1000"
+      description: Symlink host ~/.omp mount to /home/agent/.omp
+
+# ── Network ──────────────────────────────────────────────────────────────────
+# omp needs to reach model API providers. The sbx proxy injects API keys from
+# the host secret store; inside the sandbox only a placeholder is visible.
+network:
+  allowedDomains:
+    # Model providers — add the ones you use
+    - "api.anthropic.com:443"
+    - "api.openai.com:443"
+    - "openrouter.ai:443"
+    - "*.openrouter.ai:443"
+    # omp release downloads (native addon self-extraction, updates)
+    - "github.com:443"
+    - "*.githubusercontent.com:443"
+    - "raw.githubusercontent.com:443"
+    # Package registries (npm, pip, cargo)
+    - "registry.npmjs.org:443"
+    - "pypi.org:443"
+    - "files.pythonhosted.org:443"
+    # Local model servers (host.docker.internal resolves to host)
+    - "host.docker.internal:*"
+
+# ── Environment ──────────────────────────────────────────────────────────────
+# PI_CONFIG_DIR=.omp makes omp use ~/.omp (the symlink to the host mount).
+environment:
+  variables:
+    PI_CONFIG_DIR: ".omp"
+    HOME: "/home/agent"
+
+# ── Agent context (appended to AGENTS.md) ────────────────────────────────────
+agentContext: |
+  ## Sandbox environment
+
+  You are running inside a Docker sbx sandbox (microVM). The workspace is
+  mounted at `/home/agent/workspace`. Your configs (`~/.omp`) are bind-mounted
+  from the host — agent.db, managed-skills, memories, and sessions persist
+  across sandbox restarts.
+
+  `sudo` is passwordless; use it for system package installs.
+
+  The omp binary self-extracts its native addons into `~/.omp/natives/` on
+  first run. If natives fail to load, ensure `~/.omp/natives/` is writable
+  and delete the version subdir to force re-extraction.

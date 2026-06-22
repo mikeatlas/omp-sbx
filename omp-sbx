@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+###############################################################################
+# omp-sbx — launch omp inside a Docker sbx sandbox.
+#
+#   $ omp-sbx              # → resume/reconnect to existing sandbox (or create)
+#   $ omp-sbx --new        # → destroy existing sandbox and create fresh
+#   $ omp-sbx --version    # → passthrough omp flags (via sbx exec)
+#   $ omp-sbx "fix the bug"# → one-shot prompt (via sbx exec)
+#
+# Sandboxes are per-directory: running from the same cwd reconnects to the
+# same sandbox (omp session state persists). Use --new to start fresh.
+#
+# Mounts:
+#   $PWD              → /home/agent/workspace   (primary workspace, rw)
+#   $HOME/.omp        → /Users/<user>/.omp      (host path, rw — configs shared)
+#                       symlinked to /home/agent/.omp by the kit's startup cmd
+###############################################################################
+set -euo pipefail
+
+# Resolve the repo root from the script's location (works for symlinks too).
+SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+REPO_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+KIT_DIR="${OMP_SBX_KIT:-$REPO_DIR/sbx-kit}"
+TEMPLATE="${OMP_SBX_TEMPLATE:-omp-sbx:latest}"
+
+# Colors (only when stderr is a tty)
+if [ -t 2 ]; then
+  C_DIM=$'\033[2m'; C_CYAN=$'\033[36m'; C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'; C_BOLD=$'\033[1m'; C_RST=$'\033[0m'
+else
+  C_DIM=''; C_CYAN=''; C_GREEN=''; C_YELLOW=''; C_RED=''; C_BOLD=''; C_RST=''
+fi
+log() { printf '%s\n' "$*" >&2; }
+
+# ── Parse --new flag ─────────────────────────────────────────────────────────
+FORCE_NEW=false
+OMP_ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --new) FORCE_NEW=true ;;
+    *)     OMP_ARGS+=("$arg") ;;
+  esac
+done
+if [ ${#OMP_ARGS[@]} -gt 0 ]; then set -- "${OMP_ARGS[@]}"; else set --; fi
+
+# ── Preflight ────────────────────────────────────────────────────────────────
+if ! command -v sbx >/dev/null 2>&1; then
+  log "${C_RED}omp-sbx: sbx CLI not found. Install: brew install docker/tap/sbx${C_RST}"
+  exit 1
+fi
+
+if [ ! -d "$HOME/.omp" ]; then
+  log "${C_RED}omp-sbx: host config dir not found: $HOME/.omp${C_RST}"
+  exit 1
+fi
+
+# ── Sandbox name (per-directory) ─────────────────────────────────────────────
+WORKDIR="$(pwd)"
+SANDBOX_NAME="omp-$(basename "$WORKDIR" | tr -cd '[:alnum:]_-')"
+
+# ── Check if sandbox already exists ──────────────────────────────────────────
+sandbox_exists() {
+  sbx ls 2>/dev/null | grep -qw "$1"
+}
+
+# Handle --new: remove existing sandbox before creating
+if $FORCE_NEW && sandbox_exists "$SANDBOX_NAME"; then
+  log "${C_DIM}omp-sbx: removing existing sandbox '$SANDBOX_NAME' (--new)${C_RST}"
+  sbx rm -f "$SANDBOX_NAME" >/dev/null 2>&1 || true
+fi
+
+EXISTS=false
+sandbox_exists "$SANDBOX_NAME" && EXISTS=true
+
+# ── Banner ───────────────────────────────────────────────────────────────────
+log "${C_BOLD}${C_CYAN}╭─ omp-sbx ─────────────────────────────────────────────────╮${C_RST}"
+log "${C_CYAN}│${C_RST} template  : ${TEMPLATE}"
+log "${C_CYAN}│${C_RST} workspace : ${WORKDIR}  ${C_DIM}→ /home/agent/workspace${C_RST}"
+log "${C_CYAN}│${C_RST} config    : ${HOME}/.omp  ${C_DIM}(shared, via symlink)${C_RST}"
+log "${C_CYAN}│${C_RST} sandbox   : ${SANDBOX_NAME}  ${C_DIM}($([ "$EXISTS" = true ] && echo 'resuming' || echo 'new'))${C_RST}"
+if [ "$#" -eq 0 ]; then
+  log "${C_CYAN}│${C_RST} mode      : ${C_GREEN}interactive TUI${C_RST}"
+else
+  log "${C_CYAN}│${C_RST} mode      : ${C_GREEN}omp $*${C_RST}"
+fi
+log "${C_BOLD}${C_CYAN}╰─ starting omp inside the sbx sandbox ──────────────────────╯${C_RST}"
+log ""
+
+# ── Launch ───────────────────────────────────────────────────────────────────
+# If the sandbox already exists, re-attach with --kit (sbx needs the kit to
+# know the "omp" agent definition — it's not a built-in agent). Otherwise
+# create new with workspace paths.
+if [ "$#" -eq 0 ] && [ -t 0 ]; then
+  if $EXISTS; then
+    # Re-attach to existing sandbox. Must pass --kit so sbx knows the "omp"
+    # agent definition (it's not a built-in agent).
+    exec sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME"
+  else
+    # Create new sandbox with workspaces.
+    exec sbx run --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" omp "$WORKDIR" "$HOME/.omp"
+  fi
+else
+  # Non-interactive — create if needed, then exec omp with args.
+  if ! $EXISTS; then
+    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" omp "$WORKDIR" "$HOME/.omp" >/dev/null 2>&1
+    # Wait for startup commands (symlink creation) to complete.
+    sleep 2
+  fi
+  exec sbx exec "$SANDBOX_NAME" omp "$@"
+fi
