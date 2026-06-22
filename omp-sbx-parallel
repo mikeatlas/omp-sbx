@@ -146,7 +146,7 @@ pick_branch() {
     fi
     [ -z "$selected" ] && { log "${C_DIM}cancelled${C_RST}"; exit 0; }
     # Validate branch name
-    if ! git check-ref-format --normalize "refs/heads/$selected" 2>/dev/null; then
+    if ! git check-ref-format --normalize "refs/heads/$selected" >/dev/null 2>&1; then
       log "${C_RED}invalid branch name: $selected${C_RST}"
       exit 1
     fi
