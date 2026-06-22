@@ -1,0 +1,297 @@
+#!/usr/bin/env bash
+###############################################################################
+# omp-sbx-parallel — launch a parallel omp session in a git worktree.
+#
+#   $ omp-sbx-parallel              # → pick/create a branch, open worktree+sandbox
+#   $ omp-sbx-parallel --branch fix-bug   # → skip picker, use existing branch
+#   $ omp-sbx-parallel --new feature-x    # → create new branch, open worktree+sandbox
+#
+# Creates a git worktree on the chosen branch, then launches a separate sbx
+# sandbox with that worktree as the workspace. Each parallel session gets its
+# own sandbox (visible in `sbx ls`) and can commit/push independently.
+#
+# Worktrees are created as siblings of the repo root:
+#   ~/src/myproject          ← main worktree (main branch)
+#   ~/src/myproject@fix-bug  ← parallel worktree (fix-bug branch)
+#
+# On exit, you're offered cleanup: merge the branch back and remove the worktree,
+# or leave it for later.
+###############################################################################
+set -euo pipefail
+
+# Resolve the repo root from the script's location (works for symlinks too).
+SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+REPO_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+KIT_DIR="${OMP_SBX_KIT:-$REPO_DIR/sbx-kit}"
+TEMPLATE="${OMP_SBX_TEMPLATE:-omp-sbx:latest}"
+
+# Colors (only when stderr is a tty)
+if [ -t 2 ]; then
+  C_DIM=$'\033[2m'; C_CYAN=$'\033[36m'; C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'; C_BOLD=$'\033[1m'; C_RST=$'\033[0m'
+else
+  C_DIM=''; C_CYAN=''; C_GREEN=''; C_YELLOW=''; C_RED=''; C_BOLD=''; C_RST=''
+fi
+log() { printf '%s\n' "$*" >&2; }
+
+# ── Parse flags ──────────────────────────────────────────────────────────────
+BRANCH=""
+CREATE_NEW=""
+OMP_ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --branch) CREATE_NEW="existing" ;;
+    --new)    CREATE_NEW="new" ;;
+    --help|-h)
+      sed -n '2,/^###/p' "$0" | sed 's/^# \?//' >&2
+      exit 0
+      ;;
+    *)
+      # Skip the -- separator (it's for sbx run, not needed for sbx exec or omp)
+      [ "$arg" = "--" ] && continue
+      if [ "$CREATE_NEW" = "existing" ] || [ "$CREATE_NEW" = "new" ]; then
+        if [ -z "$BRANCH" ]; then
+          BRANCH="$arg"
+        else
+          OMP_ARGS+=("$arg")
+        fi
+      else
+        OMP_ARGS+=("$arg")
+      fi
+      ;;
+  esac
+done
+if [ ${#OMP_ARGS[@]} -gt 0 ]; then set -- "${OMP_ARGS[@]}"; else set --; fi
+
+# ── Preflight ────────────────────────────────────────────────────────────────
+if ! command -v sbx >/dev/null 2>&1; then
+  log "${C_RED}omp-sbx-parallel: sbx CLI not found. Install: brew install docker/tap/sbx${C_RST}"
+  exit 1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  log "${C_RED}omp-sbx-parallel: git not found${C_RST}"
+  exit 1
+fi
+
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  log "${C_RED}omp-sbx-parallel: not inside a git repository${C_RST}"
+  exit 1
+fi
+
+if [ ! -d "$HOME/.omp" ]; then
+  log "${C_RED}omp-sbx-parallel: host config dir not found: $HOME/.omp${C_RST}"
+  exit 1
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+REPO_BASE="$(basename "$REPO_ROOT")"
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+
+# ── Branch picker ────────────────────────────────────────────────────────────
+# If --branch <name> or --new <name> was given, use it directly.
+# Otherwise, show an interactive picker (fzf if available, fallback to numbered list).
+
+pick_branch() {
+  local action="$1"  # "existing" | "new"
+  local selected=""
+
+  if [ "$action" = "existing" ]; then
+    # List local branches (excluding current), let user pick
+    local branches
+    branches=$(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -v "^${CURRENT_BRANCH}$" || true)
+
+    if [ -z "$branches" ]; then
+      log "${C_YELLOW}No other local branches. Use --new <name> to create one.${C_RST}"
+      exit 1
+    fi
+
+    if command -v fzf >/dev/null 2>&1 && [ -t 0 ]; then
+      selected=$(echo "$branches" | fzf --prompt="select branch> " --height=40% --reverse --no-multi) || {
+        log "${C_DIM}cancelled${C_RST}"
+        exit 0
+      }
+    elif [ -t 0 ]; then
+      # Fallback: numbered list
+      log "${C_BOLD}Select a branch:${C_RST}"
+      local i=1
+      local branch_array=()
+      while IFS= read -r b; do
+        branch_array+=("$b")
+        printf '  %d) %s\n' "$i" "$b" >&2
+        i=$((i + 1))
+      done <<< "$branches"
+      printf '  0) cancel\n' >&2
+      printf '> ' >&2
+      read -r choice < /dev/tty
+      [ "$choice" = "0" ] && { log "${C_DIM}cancelled${C_RST}"; exit 0; }
+      if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#branch_array[@]}" ]; then
+        selected="${branch_array[$((choice - 1))]}"
+      else
+        log "${C_RED}invalid selection${C_RST}"
+        exit 1
+      fi
+    else
+      log "${C_RED}no TTY for interactive picker; use --branch <name>${C_RST}"
+      exit 1
+    fi
+  else
+    # New branch: prompt for name
+    if [ -t 0 ]; then
+      printf '%sEnter new branch name: %s' "$C_GREEN" "$C_RST" >&2
+      read -r selected < /dev/tty
+    else
+      log "${C_RED}no TTY; use --new <branch-name>${C_RST}"
+      exit 1
+    fi
+    [ -z "$selected" ] && { log "${C_DIM}cancelled${C_RST}"; exit 0; }
+    # Validate branch name
+    if ! git check-ref-branch "refs/heads/$selected" 2>/dev/null; then
+      log "${C_RED}invalid branch name: $selected${C_RST}"
+      exit 1
+    fi
+  fi
+
+  echo "$selected"
+}
+
+if [ -z "$BRANCH" ]; then
+  # No branch specified — interactive picker
+  if [ -t 0 ]; then
+    log "${C_BOLD}omp-sbx-parallel${C_RST} — parallel omp session in a git worktree"
+    log ""
+    log "  1) Use existing branch"
+    log "  2) Create new branch"
+    log ""
+    printf '> ' >&2
+    read -r choice < /dev/tty
+    case "$choice" in
+      1) BRANCH=$(pick_branch "existing") ;;
+      2) BRANCH=$(pick_branch "new") ;;
+      *) log "${C_DIM}cancelled${C_RST}"; exit 0 ;;
+    esac
+  else
+    log "${C_RED}no TTY; specify --branch <name> or --new <name>${C_RST}"
+    exit 1
+  fi
+elif [ "$CREATE_NEW" = "new" ]; then
+  # --new <name> — validate it doesn't already exist
+  if git show-ref --verify --quiet "refs/heads/$BRANCH" 2>/dev/null; then
+    log "${C_RED}branch '$BRANCH' already exists; use --branch $BRANCH to use it${C_RST}"
+    exit 1
+  fi
+  # Create the worktree on the new branch (no picker needed)
+  :
+else
+  # --branch <name> — validate it exists
+  if ! git show-ref --verify --quiet "refs/heads/$BRANCH" 2>/dev/null; then
+    log "${C_RED}branch '$BRANCH' not found${C_RST}"
+    log "${C_DIM}available branches:${C_RST}"
+    git for-each-ref --format='  %(refname:short)' refs/heads/ >&2
+    exit 1
+  fi
+fi
+
+# ── Create worktree ──────────────────────────────────────────────────────────
+WORKTREE_PATH="${REPO_ROOT%@*}"  # strip any existing @suffix
+WORKTREE_PATH="${WORKTREE_PATH}@${BRANCH//\//-}"
+
+# Check if worktree already exists (e.g. from a previous run)
+if [ -d "$WORKTREE_PATH" ]; then
+  log "${C_DIM}omp-sbx-parallel: worktree already exists at $WORKTREE_PATH${C_RST}"
+  # Verify it's a valid worktree for this branch
+  if git worktree list --porcelain | grep -q "worktree ${WORKTREE_PATH}"; then
+    log "${C_DIM}reusing existing worktree${C_RST}"
+  else
+    log "${C_YELLOW}path exists but is not a git worktree; choose a different location${C_RST}"
+    exit 1
+  fi
+else
+  if [ "$CREATE_NEW" = "new" ]; then
+    log "${C_DIM}creating worktree on new branch '$BRANCH'...${C_RST}"
+    git worktree add -b "$BRANCH" "$WORKTREE_PATH" 2>&1 | sed 's/^/  /' >&2
+  else
+    log "${C_DIM}creating worktree on existing branch '$BRANCH'...${C_RST}"
+    git worktree add "$WORKTREE_PATH" "$BRANCH" 2>&1 | sed 's/^/  /' >&2
+  fi
+fi
+
+# ── Sandbox name (unique per worktree) ───────────────────────────────────────
+SANDBOX_NAME="omp-$(echo "${REPO_BASE}-${BRANCH}" | tr -cd '[:alnum:]_-')"
+
+# ── Banner ───────────────────────────────────────────────────────────────────
+log ""
+log "${C_BOLD}${C_CYAN}╭─ omp-sbx-parallel ───────────────────────────────────────╮${C_RST}"
+log "${C_CYAN}│${C_RST} template  : ${TEMPLATE}"
+log "${C_CYAN}│${C_RST} repo      : ${REPO_ROOT}"
+log "${C_CYAN}│${C_RST} branch    : ${BRANCH}  ${C_DIM}(from ${CURRENT_BRANCH})${C_RST}"
+log "${C_CYAN}│${C_RST} worktree  : ${WORKTREE_PATH}  ${C_DIM}→ /home/agent/workspace${C_RST}"
+log "${C_CYAN}│${C_RST} config    : ${HOME}/.omp  ${C_DIM}(shared, via symlink)${C_RST}"
+log "${C_CYAN}│${C_RST} sandbox   : ${SANDBOX_NAME}"
+if [ "$#" -eq 0 ]; then
+  log "${C_CYAN}│${C_RST} mode      : ${C_GREEN}interactive TUI${C_RST}"
+else
+  log "${C_CYAN}│${C_RST} mode      : ${C_GREEN}omp $*${C_RST}"
+fi
+log "${C_BOLD}${C_CYAN}╰─ starting omp in parallel worktree sandbox ───────────────╯${C_RST}"
+log ""
+
+# ── Cleanup trap ─────────────────────────────────────────────────────────────
+# On exit (interactive mode only), offer to merge + clean up the worktree.
+cleanup() {
+  local rc=$?
+  if [ "$#" -eq 0 ] && [ -t 0 ] && [ $rc -eq 0 ]; then
+    log ""
+    log "${C_BOLD}omp-sbx-parallel: session ended${C_RST}"
+    log "  worktree: ${C_DIM}${WORKTREE_PATH}${C_RST}"
+    log "  branch:   ${C_DIM}${BRANCH}${C_RST}"
+    log ""
+    log "  1) Merge '${BRANCH}' into '${CURRENT_BRANCH}' and remove worktree"
+    log "  2) Remove worktree only (keep branch)"
+    log "  3) Keep worktree as-is"
+    log "  0) Do nothing"
+    printf '> ' >&2
+    read -r choice < /dev/tty
+    case "$choice" in
+      1)
+        cd "$REPO_ROOT"
+        git merge "$BRANCH" 2>&1 | sed 's/^/  /' >&2
+        git worktree remove "$WORKTREE_PATH" 2>&1 | sed 's/^/  /' >&2
+        git branch -d "$BRANCH" 2>&1 | sed 's/^/  /' >&2
+        log "${C_GREEN}✓ merged and cleaned up${C_RST}"
+        ;;
+      2)
+        git worktree remove "$WORKTREE_PATH" 2>&1 | sed 's/^/  /' >&2
+        log "${C_GREEN}✓ worktree removed (branch '${BRANCH}' kept)${C_RST}"
+        ;;
+      3)
+        log "${C_DIM}worktree kept at ${WORKTREE_PATH}${C_RST}"
+        ;;
+      *) ;;
+    esac
+  fi
+  exit $rc
+}
+
+# ── Launch ───────────────────────────────────────────────────────────────────
+sandbox_exists() {
+  sbx ls 2>/dev/null | grep -qw "$1"
+}
+
+if [ "$#" -eq 0 ] && [ -t 0 ]; then
+  # Interactive TUI — sbx run attaches to the terminal.
+  if sandbox_exists "$SANDBOX_NAME"; then
+    trap cleanup EXIT
+    exec sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME"
+  else
+    trap cleanup EXIT
+    exec sbx run --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" omp "$WORKTREE_PATH" "$HOME/.omp"
+  fi
+else
+  # Non-interactive — create if needed, then exec omp with args.
+  if ! sandbox_exists "$SANDBOX_NAME"; then
+    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" omp "$WORKTREE_PATH" "$HOME/.omp" >/dev/null 2>&1
+    sleep 2
+  fi
+  exec sbx exec "$SANDBOX_NAME" omp "$@"
+fi

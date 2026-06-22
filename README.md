@@ -49,6 +49,7 @@ omp "fix the bug"      # one-shot prompt
 | Template | `sbx-kit/Dockerfile` | Extends `docker/sandbox-templates:shell` with omp binary + dev tools |
 | Kit | `sbx-kit/spec.yaml` | Defines omp entrypoint, network allow-list, env, agent context |
 | Launcher | `omp-sbx` | Wrapper handling banner, sandbox lifecycle, resume vs new |
+| Parallel | `omp-sbx-parallel` | Git worktree-based parallel sandbox launcher |
 
 ### Config sharing
 
@@ -65,6 +66,23 @@ All security is handled by the sbx microVM — no manual `cap_drop`, `gosu`, `um
 | Network | Policy-based allow-list |
 | Secrets | Proxy injects keys (never enter sandbox) |
 | Resource limits | `sbx run --memory --cpus` |
+
+## Parallel sessions (git worktrees)
+
+`omp-sbx-parallel` creates a git worktree on a separate branch and launches a dedicated sandbox for it. Run it multiple times to work on multiple tasks in parallel — each gets its own worktree, branch, and sandbox.
+
+```bash
+omp-sbx-parallel                          # interactive: pick existing branch or create new
+omp-sbx-parallel --new fix-auth-bug       # create new branch + worktree + sandbox
+omp-sbx-parallel --branch feature-x       # use existing branch in a new worktree
+```
+
+On exit (interactive mode), you're offered cleanup:
+1. Merge the branch into your current branch and remove the worktree
+2. Remove the worktree only (keep the branch)
+3. Keep the worktree as-is
+
+Worktrees are created as siblings of the repo root: `~/src/myproject@fix-auth-bug`
 
 ## Rebuild after omp upgrade
 
