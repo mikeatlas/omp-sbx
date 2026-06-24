@@ -312,7 +312,7 @@ if [ "$#" -eq 0 ] && [ -t 0 ]; then
   # Phase 2: pause so the user can read sbx warnings before omp clears screen.
   if ! $SKIP_PAUSE; then
     log ""
-    log "${C_DIM}press any key to launch omp (or --yes to skip this)...${C_RST}"
+    log "${C_DIM}Press any key to launch omp (or --yes to skip this)...${C_RST}"
     read -rsn1 < /dev/tty
     log ""
   fi

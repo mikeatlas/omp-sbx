@@ -68,3 +68,7 @@ ENV PI_CONFIG_DIR=.omp \
     HOME=/home/agent
 
 WORKDIR /home/agent/workspace
+
+# Override the base image's flavor label so sbx recognizes this template as
+# built for the "omp" agent (suppresses the "built for shell agent" warning).
+LABEL com.docker.sandboxes.flavor="omp"
