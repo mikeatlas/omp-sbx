@@ -56,6 +56,29 @@ omp "fix the bug"      # one-shot prompt
 
 sbx mounts additional workspaces at their **host path** inside the container (e.g. `/Users/<user>/.omp`). The kit's startup command symlinks this to `/home/agent/.omp` so omp's `PI_CONFIG_DIR=.omp` resolves correctly.
 
+### GitHub auth forwarding
+
+The sandbox forwards your host `gh` CLI session so that `gh` commands and `git push` over HTTPS work without a separate token or SSH setup. This is a **convenience**, not a security boundary — sbx's microVM isolation is the real security control (see [Security](#security)).
+
+**What gets mounted.** If `~/.config/gh` exists on your host, `omp-sbx` bind-mounts it into the sandbox read-write. The kit's startup command symlinks it to `/home/agent/.config/gh` (via `GH_CONFIG_DIR`), then runs `gh auth setup-git` when `hosts.yml` is present — this configures `git`'s credential helper to call `gh auth git-credential`, which supplies the OAuth token for HTTPS remotes.
+
+**Why the token is "insecure."** `~/.config/gh/hosts.yml` contains an OAuth token that can authenticate to GitHub as your user. The mount is read-write, so anything running inside the sandbox can read it. This is acceptable because the sandbox is a short-lived, isolated microVM with a network allow-list — it is not a multi-tenant or untrusted environment. If you need a hard boundary, do **not** mount `~/.config/gh`: remove the `MOUNTS+=("$HOME/.config/gh")` block in the `omp-sbx` launcher (around line 68) and use an HTTPS remote with a separate credential helper or SSH instead.
+
+**Prerequisites.**
+
+1. On the host: `gh auth login` (creates `~/.config/gh/hosts.yml`).
+2. `github.com:443` must be in the network allow-list (it is by default — see `sbx-kit/spec.yaml`).
+
+**Verifying.** Inside the sandbox:
+
+```bash
+gh auth status      # should show your logged-in account
+gh status           # dashboard of assigned issues/PRs/mentions
+git push            # uses gh credential helper, no separate token needed
+```
+
+If `gh auth status` fails, the host's `~/.config/gh` is not mounted — recreate the sandbox with `omp --new`. This happens when the directory was absent on the host at sandbox-creation time; mounting is decided once, at launch.
+
 ### LSP servers
 
 The template ships with language servers for Python (`pyright`), TypeScript/JavaScript (`typescript-language-server`), Bash (`bash-language-server`), and Go (`gopls`).
