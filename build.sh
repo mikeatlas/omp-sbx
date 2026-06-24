@@ -26,6 +26,8 @@ sbx template load /tmp/omp-sbx.tar
 rm -f /tmp/omp-sbx.tar
 
 echo ">> verifying"
-sbx exec "$(sbx create --detached --kit "${DIR}/sbx-kit" --template "${IMAGE}" --name omp-verify omp /tmp 2>&1 | grep -oP 'omp-\w+' | head -1)" omp --version 2>&1 || true
-sbx rm -f omp-verify 2>&1 || true
+sbx create -q --kit "${DIR}/sbx-kit" --template "${IMAGE}" --name omp-verify omp /tmp 2>/dev/null || true
+sleep 2
+sbx exec omp-verify omp --version 2>&1 || true
+sbx rm -f omp-verify 2>/dev/null || true
 echo "✓ done"

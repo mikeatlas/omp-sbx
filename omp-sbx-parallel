@@ -19,8 +19,13 @@
 ###############################################################################
 set -euo pipefail
 
-# Resolve the repo root from the script's location (works for symlinks too).
-SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+# Resolve the repo root from the script's location (portable symlink resolution).
+SCRIPT_PATH="$0"
+while [ -L "$SCRIPT_PATH" ]; do
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+  SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+  case "$SCRIPT_PATH" in /*) ;; *) SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH" ;; esac
+done
 REPO_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 KIT_DIR="${OMP_SBX_KIT:-$REPO_DIR/sbx-kit}"
 TEMPLATE="${OMP_SBX_TEMPLATE:-omp-sbx:latest}"
