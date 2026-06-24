@@ -11,7 +11,7 @@
 # This template adds:
 #   • omp prebuilt binary (self-extracts pi_natives on first run)
 #   • bun, uv (for the pi kernel + python skills)
-#   • LSP servers (pyright, typescript-language-server)
+#   • LSP servers (pyright, typescript-language-server, bash-language-server, gopls)
 #   • Missing dev tools (fd, fzf, sqlite3, build-essential)
 #
 # Build + load into sbx:
@@ -46,7 +46,11 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/home/agent/.local/bin:${PATH}"
 
 # ── LSP servers ──────────────────────────────────────────────────────────────
+# npm-based servers
 RUN npm install -g pyright typescript-language-server typescript bash-language-server
+# gopls (Go language server) — base image has Go; binary lands in $GOPATH/bin
+RUN go install golang.org/x/tools/gopls@latest
+ENV PATH="/home/agent/go/bin:${PATH}"
 
 # ── omp prebuilt binary ──────────────────────────────────────────────────────
 # Self-extracts pi_natives.linux-<arch>.node into ~/.omp/natives/<version>/

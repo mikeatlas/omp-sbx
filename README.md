@@ -56,6 +56,40 @@ omp "fix the bug"      # one-shot prompt
 
 sbx mounts additional workspaces at their **host path** inside the container (e.g. `/Users/<user>/.omp`). The kit's startup command symlinks this to `/home/agent/.omp` so omp's `PI_CONFIG_DIR=.omp` resolves correctly.
 
+### LSP servers
+
+The template ships with language servers for Python (`pyright`), TypeScript/JavaScript (`typescript-language-server`), Bash (`bash-language-server`), and Go (`gopls`).
+
+**Two-part setup, split by concern:**
+
+| Part | Location | Rebuild needed? |
+|---|---|---|
+| Binary install | `sbx-kit/Dockerfile` (the `LSP servers` section) | Yes — `./build.sh` |
+| Server registration | `~/.omp/lsp.yml` on the host | No — live via `~/.omp` bind mount |
+
+`lsp.yml` is bind-mounted into the sandbox, so editing it takes effect immediately on the next session. Adding or changing a *binary* requires a rebuild + `omp --new`.
+
+#### Lazy loading
+
+omp starts LSP servers **lazily**, keyed on `fileTypes` matching actual files in the open workspace. A server only activates for workspaces that contain a file whose extension matches one of its `fileTypes`. The message *“No language servers configured for this project”* (from `lsp status`) means **no file in the workspace matched** any server's `fileTypes` — not that the config is missing.
+
+`rootMarkers` (`.git`, `go.mod`, `package.json`) set the project root but do **not** start a server by themselves; a matching file type is also required.
+
+#### Adding a server
+
+1. Install the binary in `sbx-kit/Dockerfile` — append to the global `npm install` line for npm packages, or add a separate `RUN` step for non-npm servers (`go install`, `cargo install`, etc.).
+2. Register the server in `~/.omp/lsp.yml`:
+   ```yaml
+     gopls:
+       command: gopls
+       args: ["serve"]
+       fileTypes: [".go"]
+       rootMarkers:
+         - "go.mod"
+         - ".git"
+   ```
+3. Rebuild + load (`./build.sh`), then start a fresh sandbox (`omp --new`).
+
 ### Security
 
 All security is handled by the sbx microVM — no manual `cap_drop`, `gosu`, `umask`, or read-only rootfs configuration needed:
