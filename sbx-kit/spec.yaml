@@ -19,15 +19,18 @@ commands:
           OMP_HOST=$(find /Users -maxdepth 2 -name .omp -type d 2>/dev/null | head -1)
           [ -n "$OMP_HOST" ] && ln -sf "$OMP_HOST" "$HOME/.omp" || true
           # Symlink host ~/.config/gh mount to /home/agent/.config/gh (gh CLI session)
-          GH_HOST=$(mount | grep 'type virtiofs' | grep '/.config/gh$' | sed 's/.* on //; s/ type.*//' | head -1)
+          GH_HOST=$(mount | grep 'type virtiofs' | grep '/.config/gh ' | sed 's/.* on //; s/ type.*//' | head -1)
           if [ -n "$GH_HOST" ] && [ "$GH_HOST" != "$HOME/.config/gh" ]; then
             mkdir -p "$HOME/.config"
+            rm -rf "$HOME/.config/gh"
             ln -sf "$GH_HOST" "$HOME/.config/gh"
           fi
           # Configure git to use gh as a credential helper (enables `git push`
           # over HTTPS by leveraging the gh OAuth token from the mounted session).
-          # Only runs when the gh config is present and gh is authenticated.
-          if [ -f "$HOME/.config/gh/hosts.yml" ] && gh auth status >/dev/null 2>&1; then
+          # setup-git just writes git config — it doesn't validate the token,
+          # so we only check that hosts.yml is present (auth status would also
+          # require network to github.com, which may not be reachable yet).
+          if [ -f "$HOME/.config/gh/hosts.yml" ]; then
             gh auth setup-git 2>/dev/null || true
           fi
           # Symlink primary workspace mount to /home/agent/workspace
