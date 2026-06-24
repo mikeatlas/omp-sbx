@@ -24,6 +24,12 @@ commands:
             mkdir -p "$HOME/.config"
             ln -sf "$GH_HOST" "$HOME/.config/gh"
           fi
+          # Configure git to use gh as a credential helper (enables `git push`
+          # over HTTPS by leveraging the gh OAuth token from the mounted session).
+          # Only runs when the gh config is present and gh is authenticated.
+          if [ -f "$HOME/.config/gh/hosts.yml" ] && gh auth status >/dev/null 2>&1; then
+            gh auth setup-git 2>/dev/null || true
+          fi
           # Symlink primary workspace mount to /home/agent/workspace
           # sbx mounts workspaces at their host path; we need them at the
           # template's WORKDIR (/home/agent/workspace) for omp to find them.
@@ -33,7 +39,7 @@ commands:
             ln -sf "$WS_HOST" /home/agent/workspace
           fi
       user: "1000"
-      description: Symlink host mounts to /home/agent/.omp and /home/agent/workspace
+      description: Symlink host mounts and configure gh credential helper for git push
 
 # ── Network ──────────────────────────────────────────────────────────────────
 # omp needs to reach model API providers. The sbx proxy injects API keys from
@@ -72,6 +78,10 @@ agentContext: |
   mounted at `/home/agent/workspace`. Your configs (`~/.omp`) are bind-mounted
   from the host — agent.db, managed-skills, memories, and sessions persist
   across sandbox restarts.
+  GitHub authentication is forwarded from the host: `gh` CLI commands work
+  directly, and `git push` over HTTPS uses the gh credential helper (no
+  separate token or SSH setup needed). If `gh auth status` fails, the host's
+  `~/.config/gh` is not mounted — recreate the sandbox with `omp-sbx --new`.
 
   `sudo` is passwordless; use it for system package installs.
 
