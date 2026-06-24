@@ -61,6 +61,8 @@ network:
     - "files.pythonhosted.org:443"
     # Local model servers (host.docker.internal resolves to host)
     - "host.docker.internal:*"
+    # AI context
+    - "*.context7.com:443"
 
 # ── Environment ──────────────────────────────────────────────────────────────
 # PI_CONFIG_DIR=.omp makes omp use ~/.omp (the symlink to the host mount).
