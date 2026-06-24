@@ -61,6 +61,14 @@ if [ ! -d "$HOME/.omp" ]; then
   exit 1
 fi
 
+# Host paths to bind-mount into the sandbox (in addition to the workspace).
+# ~/.config/gh is optional — only mounted if present on the host, so the gh
+# CLI session (hosts.yml + oauth_token) carries into the container.
+MOUNTS=("$HOME/.omp")
+if [ -d "$HOME/.config/gh" ]; then
+  MOUNTS+=("$HOME/.config/gh")
+fi
+
 # ── Sandbox name (per-directory) ─────────────────────────────────────────────
 WORKDIR="$(pwd)"
 SANDBOX_NAME="omp-$(basename "$WORKDIR" | tr -cd '[:alnum:]_-')"
@@ -86,6 +94,9 @@ log "${C_BOLD}${C_CYAN}╭─ omp-sbx ──────────────
 log "${C_CYAN}│${C_RST} template  : ${TEMPLATE}"
 log "${C_CYAN}│${C_RST} workspace : ${WORKDIR}  ${C_DIM}→ /home/agent/workspace${C_RST}"
 log "${C_CYAN}│${C_RST} config    : ${HOME}/.omp  ${C_DIM}(shared, via symlink)${C_RST}"
+if [ -d "$HOME/.config/gh" ]; then
+  log "${C_CYAN}│${C_RST} gh session: ${HOME}/.config/gh  ${C_DIM}(shared, via symlink)${C_RST}"
+fi
 log "${C_CYAN}│${C_RST} sandbox   : ${SANDBOX_NAME}  ${C_DIM}($([ "$EXISTS" = true ] && echo 'resuming' || echo 'new'))${C_RST}"
 if [ "$#" -eq 0 ]; then
   log "${C_CYAN}│${C_RST} mode      : ${C_GREEN}interactive TUI${C_RST}"
@@ -106,7 +117,7 @@ if [ "$#" -eq 0 ] && [ -t 0 ]; then
   if ! $EXISTS; then
     # Phase 1: create the sandbox (warnings visible on stderr).
     sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
-      omp "$WORKDIR" "$HOME/.omp" 2>&1 || {
+      omp "$WORKDIR" "${MOUNTS[@]}" 2>&1 || {
       log "${C_RED}omp-sbx: failed to create sandbox${C_RST}"
       exit 1
     }
@@ -127,14 +138,14 @@ if [ "$#" -eq 0 ] && [ -t 0 ]; then
   sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1 || {
     log "${C_DIM}omp-sbx: sandbox not found, creating new...${C_RST}"
     sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
-      omp "$WORKDIR" "$HOME/.omp" 2>&1
+      omp "$WORKDIR" "${MOUNTS[@]}" 2>&1
     sleep 2
     exec sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME"
   }
 else
   # Non-interactive — create if needed, then exec omp with args.
   if ! $EXISTS; then
-    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" omp "$WORKDIR" "$HOME/.omp" >/dev/null 2>&1
+    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" omp "$WORKDIR" "${MOUNTS[@]}" >/dev/null 2>&1
     sleep 2
   fi
   exec sbx exec "$SANDBOX_NAME" omp "$@"
