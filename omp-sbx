@@ -90,6 +90,15 @@ fi
 log "${C_BOLD}${C_CYAN}╰─ starting omp inside the sbx sandbox ──────────────────────╯${C_RST}"
 log ""
 
+# ── Pause before launch (interactive only) ──────────────────────────────────
+# Give the user a chance to read startup output/warnings before omp clears
+# the screen. Skip with --yes/-y or non-interactive mode.
+if [ "$#" -eq 0 ] && [ -t 0 ] && ! $SKIP_PAUSE; then
+  log "${C_DIM}press any key to launch omp (or --yes to skip this)...${C_RST}"
+  read -rsn1 < /dev/tty
+  log ""
+fi
+
 # ── Launch ───────────────────────────────────────────────────────────────────
 # If the sandbox already exists, re-attach with --kit (sbx needs the kit to
 # know the "omp" agent definition — it's not a built-in agent). Otherwise
