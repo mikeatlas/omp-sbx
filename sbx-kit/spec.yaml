@@ -11,9 +11,23 @@ sandbox:
     run: [omp]
 commands:
   startup:
-    - command: ["bash", "-c", "OMP_HOST=$(find /Users -maxdepth 2 -name .omp -type d 2>/dev/null | head -1); [ -n \"$OMP_HOST\" ] && ln -sf \"$OMP_HOST\" \"$HOME/.omp\" || true"]
+    - command:
+        - "bash"
+        - "-c"
+        - |
+          # Symlink host ~/.omp mount to /home/agent/.omp
+          OMP_HOST=$(find /Users -maxdepth 2 -name .omp -type d 2>/dev/null | head -1)
+          [ -n "$OMP_HOST" ] && ln -sf "$OMP_HOST" "$HOME/.omp" || true
+          # Symlink primary workspace mount to /home/agent/workspace
+          # sbx mounts workspaces at their host path; we need them at the
+          # template's WORKDIR (/home/agent/workspace) for omp to find them.
+          WS_HOST=$(mount | grep 'type virtiofs' | grep -v '\.omp' | grep -v resolv | sed 's/.* on //; s/ type.*//' | head -1)
+          if [ -n "$WS_HOST" ] && [ "$WS_HOST" != "/home/agent/workspace" ]; then
+            rm -rf /home/agent/workspace
+            ln -sf "$WS_HOST" /home/agent/workspace
+          fi
       user: "1000"
-      description: Symlink host ~/.omp mount to /home/agent/.omp
+      description: Symlink host mounts to /home/agent/.omp and /home/agent/workspace
 
 # ── Network ──────────────────────────────────────────────────────────────────
 # omp needs to reach model API providers. The sbx proxy injects API keys from

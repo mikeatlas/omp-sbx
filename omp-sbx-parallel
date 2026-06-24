@@ -280,17 +280,22 @@ sandbox_exists() {
 
 if [ "$#" -eq 0 ] && [ -t 0 ]; then
   # Interactive TUI — sbx run attaches to the terminal.
+  # Pass the main repo's .git dir as a mount so git worktree operations
+  # (commit, branch, log, push) work inside the container. Must be rw —
+  # worktree commits write to .git/worktrees/<name>/index.lock.
   if sandbox_exists "$SANDBOX_NAME"; then
     trap cleanup EXIT
     exec sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME"
   else
     trap cleanup EXIT
-    exec sbx run --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" omp "$WORKTREE_PATH" "$HOME/.omp"
+    exec sbx run --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
+      omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git:ro"
   fi
 else
   # Non-interactive — create if needed, then exec omp with args.
   if ! sandbox_exists "$SANDBOX_NAME"; then
-    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" omp "$WORKTREE_PATH" "$HOME/.omp" >/dev/null 2>&1
+    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
+      omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git:ro" >/dev/null 2>&1
     sleep 2
   fi
   exec sbx exec "$SANDBOX_NAME" omp "$@"
