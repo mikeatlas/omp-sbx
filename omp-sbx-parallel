@@ -282,32 +282,44 @@ sandbox_exists() {
   sbx ls 2>/dev/null | awk -v name="$1" 'NR>1 && $1 == name {found=1} END {exit !found}'
 }
 
-# ── Pause before launch (interactive only) ──────────────────────────────────
-# Give the user a chance to read startup output/warnings before omp clears
-# the screen. Skip with --yes/-y or non-interactive mode.
-if [ "$#" -eq 0 ] && [ -t 0 ] && ! $SKIP_PAUSE; then
-  log "${C_DIM}press any key to launch omp (or --yes to skip this)...${C_RST}"
-  read -rsn1 < /dev/tty
-  log ""
-fi
-
+# Two-phase approach for interactive mode:
+#   1. sbx create (non-interactive) — captures warnings to stderr where the
+#      user can read them before omp clears the screen.
+#   2. Pause — "press any key" gives time to read the warnings.
+#   3. sbx run --name (attaches to TUI) — omp launches and clears screen.
+# The main repo's .git dir is mounted rw so git worktree operations (commit,
+# branch, log, push) work inside the container.
 if [ "$#" -eq 0 ] && [ -t 0 ]; then
-  # Interactive TUI — sbx run attaches to the terminal.
-  # Pass the main repo's .git dir as a mount so git worktree operations
-  # (commit, branch, log, push) work inside the container. Must be rw —
-  # worktree commits write to .git/worktrees/<name>/index.lock.
-  if sandbox_exists "$SANDBOX_NAME"; then
+  # Interactive TUI.
+  if ! sandbox_exists "$SANDBOX_NAME"; then
+    # Phase 1: create the sandbox (warnings visible on stderr).
     trap cleanup EXIT
-    sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1 || {
-      log "${C_DIM}omp-sbx-parallel: sandbox not found, creating new...${C_RST}"
-      exec sbx run --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
-        omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git"
+    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
+      omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git" 2>&1 || {
+      log "${C_RED}omp-sbx-parallel: failed to create sandbox${C_RST}"
+      exit 1
     }
+    sleep 2
   else
     trap cleanup EXIT
-    exec sbx run --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
-      omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git"
   fi
+
+  # Phase 2: pause so the user can read sbx warnings before omp clears screen.
+  if ! $SKIP_PAUSE; then
+    log ""
+    log "${C_DIM}press any key to launch omp (or --yes to skip this)...${C_RST}"
+    read -rsn1 < /dev/tty
+    log ""
+  fi
+
+  # Phase 3: attach to the sandbox TUI.
+  sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1 || {
+    log "${C_DIM}omp-sbx-parallel: sandbox not found, creating new...${C_RST}"
+    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
+      omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git" 2>&1
+    sleep 2
+    exec sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME"
+  }
 else
   # Non-interactive — create if needed, then exec omp with args.
   if ! sandbox_exists "$SANDBOX_NAME"; then

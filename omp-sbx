@@ -89,39 +89,47 @@ else
 fi
 log "${C_BOLD}${C_CYAN}╰─ starting omp inside the sbx sandbox ──────────────────────╯${C_RST}"
 log ""
-
-# ── Pause before launch (interactive only) ──────────────────────────────────
-# Give the user a chance to read startup output/warnings before omp clears
-# the screen. Skip with --yes/-y or non-interactive mode.
-if [ "$#" -eq 0 ] && [ -t 0 ] && ! $SKIP_PAUSE; then
-  log "${C_DIM}press any key to launch omp (or --yes to skip this)...${C_RST}"
-  read -rsn1 < /dev/tty
-  log ""
-fi
-
 # ── Launch ───────────────────────────────────────────────────────────────────
-# If the sandbox already exists, re-attach with --kit (sbx needs the kit to
-# know the "omp" agent definition — it's not a built-in agent). Otherwise
-# create new with workspace paths.
+# Two-phase approach for interactive mode:
+#   1. sbx create (non-interactive) — captures warnings to stderr where the
+#      user can read them before omp clears the screen.
+#   2. Pause — "press any key" gives time to read the warnings.
+#   3. sbx run --name (attaches to TUI) — omp launches and clears screen.
+# For non-interactive mode, reuse the sandbox or create silently, then exec.
 if [ "$#" -eq 0 ] && [ -t 0 ]; then
-  # Interactive TUI — sbx run attaches to the terminal.
-  if $EXISTS; then
-    # Re-attach to existing sandbox. Must pass --kit so sbx knows the "omp"
-    # agent definition (it's not a built-in agent). Fall back to creating
-    # if the sandbox was stale or removed externally.
-    sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1 || {
-      log "${C_DIM}omp-sbx: sandbox not found, creating new...${C_RST}"
-      exec sbx run --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" omp "$WORKDIR" "$HOME/.omp"
+  # Interactive TUI.
+  if ! $EXISTS; then
+    # Phase 1: create the sandbox (warnings visible on stderr).
+    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
+      omp "$WORKDIR" "$HOME/.omp" 2>&1 || {
+      log "${C_RED}omp-sbx: failed to create sandbox${C_RST}"
+      exit 1
     }
-  else
-    # Create new sandbox with workspaces.
-    exec sbx run --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" omp "$WORKDIR" "$HOME/.omp"
+    # Wait for startup commands (symlink creation) to complete.
+    sleep 2
   fi
+
+  # Phase 2: pause so the user can read sbx warnings before omp clears screen.
+  if ! $SKIP_PAUSE; then
+    log ""
+    log "${C_DIM}press any key to launch omp (or --yes to skip this)...${C_RST}"
+    read -rsn1 < /dev/tty
+    log ""
+  fi
+
+  # Phase 3: attach to the sandbox TUI. Must pass --kit so sbx knows the "omp"
+  # agent definition (it's not a built-in agent). Fall back to creating if stale.
+  sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1 || {
+    log "${C_DIM}omp-sbx: sandbox not found, creating new...${C_RST}"
+    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
+      omp "$WORKDIR" "$HOME/.omp" 2>&1
+    sleep 2
+    exec sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME"
+  }
 else
   # Non-interactive — create if needed, then exec omp with args.
   if ! $EXISTS; then
     sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" omp "$WORKDIR" "$HOME/.omp" >/dev/null 2>&1
-    # Wait for startup commands (symlink creation) to complete.
     sleep 2
   fi
   exec sbx exec "$SANDBOX_NAME" omp "$@"
