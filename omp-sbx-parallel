@@ -166,8 +166,8 @@ if [ -z "$BRANCH" ]; then
     printf '> ' >&2
     read -r choice < /dev/tty
     case "$choice" in
-      1) BRANCH=$(pick_branch "existing") ;;
-      2) BRANCH=$(pick_branch "new") ;;
+      1) BRANCH=$(pick_branch "existing"); CREATE_NEW="existing" ;;
+      2) BRANCH=$(pick_branch "new"); CREATE_NEW="new" ;;
       *) log "${C_DIM}cancelled${C_RST}"; exit 0 ;;
     esac
   else
