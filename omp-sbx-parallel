@@ -275,7 +275,9 @@ cleanup() {
 
 # ── Launch ───────────────────────────────────────────────────────────────────
 sandbox_exists() {
-  sbx ls 2>/dev/null | grep -qw "$1"
+  # Use awk to match the SANDBOX column exactly (avoids false positives
+  # like omp-Foo matching omp-Foo-parallel2).
+  sbx ls 2>/dev/null | awk -v name="$1" 'NR>1 && $1 == name {found=1} END {exit !found}'
 }
 
 if [ "$#" -eq 0 ] && [ -t 0 ]; then
@@ -285,17 +287,21 @@ if [ "$#" -eq 0 ] && [ -t 0 ]; then
   # worktree commits write to .git/worktrees/<name>/index.lock.
   if sandbox_exists "$SANDBOX_NAME"; then
     trap cleanup EXIT
-    exec sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME"
+    sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1 || {
+      log "${C_DIM}omp-sbx-parallel: sandbox not found, creating new...${C_RST}"
+      exec sbx run --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
+        omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git"
+    }
   else
     trap cleanup EXIT
     exec sbx run --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
-      omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git:ro"
+      omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git"
   fi
 else
   # Non-interactive — create if needed, then exec omp with args.
   if ! sandbox_exists "$SANDBOX_NAME"; then
     sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
-      omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git:ro" >/dev/null 2>&1
+      omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git" >/dev/null 2>&1
     sleep 2
   fi
   exec sbx exec "$SANDBOX_NAME" omp "$@"

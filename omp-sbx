@@ -60,7 +60,9 @@ SANDBOX_NAME="omp-$(basename "$WORKDIR" | tr -cd '[:alnum:]_-')"
 
 # ── Check if sandbox already exists ──────────────────────────────────────────
 sandbox_exists() {
-  sbx ls 2>/dev/null | grep -qw "$1"
+  # Use awk to match the SANDBOX column exactly (first field, avoids
+  # false positives like omp-Foo matching omp-Foo-parallel2).
+  sbx ls 2>/dev/null | awk -v name="$1" 'NR>1 && $1 == name {found=1} END {exit !found}'
 }
 
 # Handle --new: remove existing sandbox before creating
@@ -91,10 +93,15 @@ log ""
 # know the "omp" agent definition — it's not a built-in agent). Otherwise
 # create new with workspace paths.
 if [ "$#" -eq 0 ] && [ -t 0 ]; then
+  # Interactive TUI — sbx run attaches to the terminal.
   if $EXISTS; then
     # Re-attach to existing sandbox. Must pass --kit so sbx knows the "omp"
-    # agent definition (it's not a built-in agent).
-    exec sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME"
+    # agent definition (it's not a built-in agent). Fall back to creating
+    # if the sandbox was stale or removed externally.
+    sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1 || {
+      log "${C_DIM}omp-sbx: sandbox not found, creating new...${C_RST}"
+      exec sbx run --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" omp "$WORKDIR" "$HOME/.omp"
+    }
   else
     # Create new sandbox with workspaces.
     exec sbx run --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" omp "$WORKDIR" "$HOME/.omp"
