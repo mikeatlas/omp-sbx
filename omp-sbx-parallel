@@ -37,11 +37,13 @@ log() { printf '%s\n' "$*" >&2; }
 # ── Parse flags ──────────────────────────────────────────────────────────────
 BRANCH=""
 CREATE_NEW=""
+SKIP_PAUSE=false
 OMP_ARGS=()
 for arg in "$@"; do
   case "$arg" in
     --branch) CREATE_NEW="existing" ;;
     --new)    CREATE_NEW="new" ;;
+    --yes|-y) SKIP_PAUSE=true ;;
     --help|-h)
       sed -n '2,/^###/p' "$0" | sed 's/^# \?//' >&2
       exit 0
@@ -279,6 +281,15 @@ sandbox_exists() {
   # like omp-Foo matching omp-Foo-parallel2).
   sbx ls 2>/dev/null | awk -v name="$1" 'NR>1 && $1 == name {found=1} END {exit !found}'
 }
+
+# ── Pause before launch (interactive only) ──────────────────────────────────
+# Give the user a chance to read startup output/warnings before omp clears
+# the screen. Skip with --yes/-y or non-interactive mode.
+if [ "$#" -eq 0 ] && [ -t 0 ] && ! $SKIP_PAUSE; then
+  log "${C_DIM}press any key to launch omp (or --yes to skip this)...${C_RST}"
+  read -rsn1 < /dev/tty
+  log ""
+fi
 
 if [ "$#" -eq 0 ] && [ -t 0 ]; then
   # Interactive TUI — sbx run attaches to the terminal.

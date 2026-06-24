@@ -32,13 +32,15 @@ else
 fi
 log() { printf '%s\n' "$*" >&2; }
 
-# ── Parse --new flag ─────────────────────────────────────────────────────────
+# ── Parse flags ──────────────────────────────────────────────────────────────
 FORCE_NEW=false
+SKIP_PAUSE=false
 OMP_ARGS=()
 for arg in "$@"; do
   case "$arg" in
-    --new) FORCE_NEW=true ;;
-    *)     OMP_ARGS+=("$arg") ;;
+    --new)  FORCE_NEW=true ;;
+    --yes|-y) SKIP_PAUSE=true ;;
+    *)      OMP_ARGS+=("$arg") ;;
   esac
 done
 if [ ${#OMP_ARGS[@]} -gt 0 ]; then set -- "${OMP_ARGS[@]}"; else set --; fi

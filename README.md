@@ -38,6 +38,7 @@ echo "alias omp='omp-sbx'" >> ~/.zshrc
 ```bash
 omp                    # interactive TUI (cwd = workspace, ~/.omp shared)
 omp --new              # destroy + create fresh sandbox
+omp --yes              # skip the pre-launch "press any key" pause
 omp --version          # passthrough flags to omp
 omp "fix the bug"      # one-shot prompt
 ```
