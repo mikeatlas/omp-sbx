@@ -18,12 +18,6 @@ commands:
           # Symlink host ~/.omp mount to /home/agent/.omp
           OMP_HOST=$(find /Users -maxdepth 2 -name .omp -type d 2>/dev/null | head -1)
           [ -n "$OMP_HOST" ] && ln -sf "$OMP_HOST" "$HOME/.omp" || true
-          # Symlink host ~/.config/gh mount to /home/agent/.config/gh (gh CLI session)
-          GH_HOST=$(mount | grep 'type virtiofs' | grep '/.config/gh$' | sed 's/.* on //; s/ type.*//' | head -1)
-          if [ -n "$GH_HOST" ] && [ "$GH_HOST" != "$HOME/.config/gh" ]; then
-            mkdir -p "$HOME/.config"
-            ln -sf "$GH_HOST" "$HOME/.config/gh"
-          fi
           # Symlink primary workspace mount to /home/agent/workspace
           # sbx mounts workspaces at their host path; we need them at the
           # template's WORKDIR (/home/agent/workspace) for omp to find them.
@@ -62,7 +56,6 @@ environment:
   variables:
     PI_CONFIG_DIR: ".omp"
     HOME: "/home/agent"
-    GH_CONFIG_DIR: "/home/agent/.config/gh"
 
 # ── Agent context (appended to AGENTS.md) ────────────────────────────────────
 agentContext: |
