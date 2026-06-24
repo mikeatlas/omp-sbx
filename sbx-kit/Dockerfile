@@ -46,7 +46,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/home/agent/.local/bin:${PATH}"
 
 # ── LSP servers ──────────────────────────────────────────────────────────────
-RUN npm install -g pyright typescript-language-server typescript
+RUN npm install -g pyright typescript-language-server typescript bash-language-server
 
 # ── omp prebuilt binary ──────────────────────────────────────────────────────
 # Self-extracts pi_natives.linux-<arch>.node into ~/.omp/natives/<version>/
