@@ -142,6 +142,34 @@ On exit (interactive mode), you're offered cleanup:
 
 Worktrees are created as siblings of the repo root: `~/src/myproject@fix-auth-bug`
 
+### VS Code worktree integration
+
+`omp-sbx-parallel` maintains a multi-root `.code-workspace` file at the repo root (`<repo-name>.code-workspace`) so VS Code can display all active worktrees as named roots in one window. The file is gitignored (`*.code-workspace`) — it's machine-local, never committed.
+
+**What happens automatically:**
+
+| Event | `.code-workspace` action |
+|---|---|
+| Worktree created/reused | Worktree added as a named root |
+| Cleanup: merge + remove | Root removed |
+| Cleanup: remove only | Root removed |
+| Cleanup: keep as-is | Root left in file |
+
+**Folder naming:** main checkout is `<repo-name>`; each worktree is `<repo-name> <branch>`. This lets VS Code tasks pin cwd via `${workspaceFolder:<name>}`:
+
+```json
+{
+  "label": "agent: feature-x",
+  "type": "shell",
+  "command": "omp-sbx-parallel --branch feature-x",
+  "options": { "cwd": "${workspaceFolder:myrepo feature-x}" }
+}
+```
+
+Requires `jq` on the host (silently skips if unavailable). For full agent instructions, see [`INSTRUCTIONS.md`](INSTRUCTIONS.md).
+
+**VS Code settings:** enable `git.detectWorktrees` to auto-list all worktrees in Source Control, even ones created outside VS Code.
+
 ## Rebuild after omp upgrade
 
 ```bash

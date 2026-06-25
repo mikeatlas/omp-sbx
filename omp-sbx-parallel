@@ -223,6 +223,59 @@ else
   fi
 fi
 
+# ── VS Code workspace file management ────────────────────────────────────────
+# Maintain a multi-root .code-workspace at the repo root so VS Code can display
+# all worktrees as named roots. The file is gitignored (*.code-workspace).
+# Requires jq on the host; silently skips if unavailable.
+WORKSPACE_FILE="$REPO_ROOT/$REPO_BASE.code-workspace"
+
+init_code_workspace() {
+  if [ ! -f "$WORKSPACE_FILE" ]; then
+    cat > "$WORKSPACE_FILE" <<EOF
+{
+  "folders": [
+    { "path": ".", "name": "$REPO_BASE" }
+  ],
+  "settings": {}
+}
+EOF
+    log "${C_DIM}created $WORKSPACE_FILE${C_RST}"
+  fi
+}
+
+add_worktree_to_workspace() {
+  local branch="$1"
+  local wt_path="$2"
+  local folder_name="$REPO_BASE $branch"
+  local rel_path="../$(basename "$wt_path")"
+
+  if ! command -v jq >/dev/null 2>&1; then
+    log "${C_YELLOW}jq not found — skipping .code-workspace update${C_RST}"
+    return 0
+  fi
+  init_code_workspace
+  # Idempotent: remove existing entry for this branch, then add.
+  jq --arg name "$folder_name" --arg path "$rel_path" \
+    '.folders |= map(select(.name != $name)) + [{"path": $path, "name": $name}]' \
+    "$WORKSPACE_FILE" > "$WORKSPACE_FILE.tmp" && mv "$WORKSPACE_FILE.tmp" "$WORKSPACE_FILE"
+  log "${C_DIM}added '$folder_name' to $REPO_BASE.code-workspace${C_RST}"
+}
+
+remove_worktree_from_workspace() {
+  local branch="$1"
+  local folder_name="$REPO_BASE $branch"
+
+  if [ ! -f "$WORKSPACE_FILE" ] || ! command -v jq >/dev/null 2>&1; then
+    return 0
+  fi
+  jq --arg name "$folder_name" \
+    '.folders |= map(select(.name != $name))' \
+    "$WORKSPACE_FILE" > "$WORKSPACE_FILE.tmp" && mv "$WORKSPACE_FILE.tmp" "$WORKSPACE_FILE"
+  log "${C_DIM}removed '$folder_name' from $REPO_BASE.code-workspace${C_RST}"
+}
+
+add_worktree_to_workspace "$BRANCH" "$WORKTREE_PATH"
+
 # ── Sandbox name (unique per worktree) ───────────────────────────────────────
 SANDBOX_NAME="omp-$(echo "${REPO_BASE}-${BRANCH}" | tr -cd '[:alnum:]_-')"
 
@@ -265,10 +318,12 @@ cleanup() {
         git merge "$BRANCH" 2>&1 | sed 's/^/  /' >&2
         git worktree remove "$WORKTREE_PATH" 2>&1 | sed 's/^/  /' >&2
         git branch -d "$BRANCH" 2>&1 | sed 's/^/  /' >&2
+        remove_worktree_from_workspace "$BRANCH"
         log "${C_GREEN}✓ merged and cleaned up${C_RST}"
         ;;
       2)
         git worktree remove "$WORKTREE_PATH" 2>&1 | sed 's/^/  /' >&2
+        remove_worktree_from_workspace "$BRANCH"
         log "${C_GREEN}✓ worktree removed (branch '${BRANCH}' kept)${C_RST}"
         ;;
       3)
