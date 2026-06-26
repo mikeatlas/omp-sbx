@@ -307,7 +307,8 @@ cleanup() {
     log ""
     log "  1) Merge '${BRANCH}' into '${CURRENT_BRANCH}' and remove worktree"
     log "  2) Remove worktree only (keep branch)"
-    log "  3) Keep worktree as-is"
+    log "  3) Remove worktree AND branch '${BRANCH}' (no merge) ${C_RED}[destructive]${C_RST}"
+    log "  4) Keep worktree as-is"
     log "  0) Do nothing"
     printf '> ' >&2
     read -r choice < /dev/tty
@@ -326,6 +327,28 @@ cleanup() {
         log "${C_GREEN}✓ worktree removed (branch '${BRANCH}' kept)${C_RST}"
         ;;
       3)
+        log ""
+        log "${C_RED}⚠  This will permanently remove the worktree AND delete the branch '${BRANCH}'.${C_RST}"
+        log "${C_RED}   Any unmerged commits on '${BRANCH}' will be LOST.${C_RST}"
+        log ""
+        log "${C_BOLD}Type 'yes' to confirm (3s guard before input)...${C_RST}"
+        log "${C_DIM}waiting 3 seconds...${C_RST}"
+        sleep 3
+        printf '%sconfirm> %s' "$C_GREEN" "$C_RST" >&2
+        read -r confirm < /dev/tty
+        case "$confirm" in
+          [Yy][Ee][Ss])
+            git worktree remove "$WORKTREE_PATH" 2>&1 | sed 's/^/  /' >&2
+            git branch -D "$BRANCH" 2>&1 | sed 's/^/  /' >&2
+            remove_worktree_from_workspace "$BRANCH"
+            log "${C_GREEN}✓ worktree and branch '${BRANCH}' removed${C_RST}"
+            ;;
+          *)
+            log "${C_YELLOW}aborted: worktree and branch left intact${C_RST}"
+            ;;
+        esac
+        ;;
+      4)
         log "${C_DIM}worktree kept at ${WORKTREE_PATH}${C_RST}"
         ;;
       *) ;;
