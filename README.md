@@ -1,4 +1,8 @@
-# omp-sbx
+<p align="center">
+  <img width="250" alt="Image" src="https://github.com/user-attachments/assets/c91d67e4-c6a6-46c0-a7dd-4f682cc67193" />
+</p>
+
+# omp-sbx Oh My Pi Sandbox
 
 Run the [omp coding agent](https://omp.sh) (oh-my-pi) inside a [Docker sbx](https://docs.docker.com/ai/sandboxes/) sandbox with host configs shared.
 
