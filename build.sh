@@ -85,8 +85,19 @@ docker build \
 
 echo ">> saving + loading into sbx runtime"
 docker image save "${IMAGE}" -o /tmp/omp-sbx.tar
-sbx template load /tmp/omp-sbx.tar
-rm -f /tmp/omp-sbx.tar
+if ! sbx template load /tmp/omp-sbx.tar; then
+  if [ -t 2 ]; then C_BRED=$'\033[1;31m'; C_RST=$'\033[0m'; else C_BRED=''; C_RST=''; fi
+  echo "" >&2
+  echo "${C_BRED}ERROR: sbx template load failed.${C_RST}" >&2
+  echo "${C_BRED}If the error mentions '401 Unauthorized' or 'no valid user session',${C_RST}" >&2
+  echo "${C_BRED}you are not authenticated to Docker/sbx. Run:${C_RST}" >&2
+  echo "" >&2
+  echo "  sbx login" >&2
+  echo "" >&2
+  echo "${C_BRED}then re-run ./build.sh${C_RST}" >&2
+  rm -f /tmp/omp-sbx.tar
+  exit 1
+fi
 
 echo ">> verifying"
 sbx create -q --kit "${DIR}/sbx-kit" --template "${IMAGE}" --name omp-verify omp /tmp 2>/dev/null || true
