@@ -51,6 +51,7 @@ omp "fix the bug"      # one-shot prompt
 | Kit | `sbx-kit/spec.yaml` | Defines omp entrypoint, network allow-list, env, agent context |
 | Launcher | `omp-sbx` | Wrapper handling banner, sandbox lifecycle, resume vs new |
 | Parallel | `omp-sbx-parallel` | Git worktree-based parallel sandbox launcher |
+| Browser CLI | `sbx-kit/Dockerfile` | Installs `agent-browser` (replaces Puppeteer, which can't spawn in sbx) |
 
 ### Config sharing
 
@@ -112,6 +113,23 @@ omp starts LSP servers **lazily**, keyed on `fileTypes` matching actual files in
          - ".git"
    ```
 3. Rebuild + load (`./build.sh`), then start a fresh sandbox (`omp --new`).
+
+### Browser automation (agent-browser)
+
+The omp `browser` tool (Puppeteer/Chromium) **cannot spawn inside the sbx microVM** — the bundled `chrome-linux64` binary fails with `ENOEXEC`. The template instead ships [`agent-browser`](https://github.com/vercel-labs/agent-browser), a native Rust CLI that downloads its own Chrome for Testing and installs Linux browser dependencies at build time.
+
+```bash
+agent-browser open https://example.com      # launch + navigate
+agent-browser snapshot                       # accessibility tree with @eN refs
+agent-browser click @e2                      # click by ref
+agent-browser fill @e3 "text"                # fill input
+agent-browser screenshot page.png            # capture
+agent-browser close
+```
+
+For **static content** (articles, docs, GitHub issues/PRs, JSON, PDFs) no browser is needed — the omp `read` tool fetches clean text/markdown from a URL directly. Reach for `agent-browser` only when JS execution or interaction is required.
+
+Changing the `agent-browser` version or its Chrome download requires a rebuild (`./build.sh`) + `omp --new`.
 
 ### Security
 

@@ -12,6 +12,7 @@
 #   • omp prebuilt binary (self-extracts pi_natives on first run)
 #   • bun, uv (for the pi kernel + python skills)
 #   • LSP servers (pyright, typescript-language-server, bash-language-server, gopls)
+#   • agent-browser (browser automation for AI agents — replaces Puppeteer, which can't spawn in sbx)
 #   • Missing dev tools (fd, fzf, sqlite3, build-essential)
 #
 # Build + load into sbx:
@@ -51,6 +52,13 @@ RUN npm install -g pyright typescript-language-server typescript bash-language-s
 # gopls (Go language server) — base image has Go; binary lands in $GOPATH/bin
 RUN go install golang.org/x/tools/gopls@latest
 ENV PATH="/home/agent/go/bin:${PATH}"
+
+# ── agent-browser (browser automation for AI agents) ────────────────────────
+# Native Rust CLI with its own Chrome for Testing — replaces the omp `browser`
+# (Puppeteer) tool, which cannot spawn Chromium inside the sbx microVM.
+# `install` downloads Chrome + Linux browser deps.
+RUN npm install -g agent-browser
+RUN agent-browser install
 
 # ── omp prebuilt binary ──────────────────────────────────────────────────────
 # Self-extracts pi_natives.linux-<arch>.node into ~/.omp/natives/<version>/

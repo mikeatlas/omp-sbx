@@ -67,6 +67,7 @@ network:
     # AI/doc context
     - "*.context7.com:443"
     - "code.visualstudio.com:443"
+    - "*.cloudflare.com:443"
 
 # ── Environment ──────────────────────────────────────────────────────────────
 # PI_CONFIG_DIR=.omp makes omp use ~/.omp (the symlink to the host mount).
@@ -84,6 +85,7 @@ agentContext: |
   mounted at `/home/agent/workspace`. Your configs (`~/.omp`) are bind-mounted
   from the host — agent.db, managed-skills, memories, and sessions persist
   across sandbox restarts.
+
   GitHub authentication is forwarded from the host: `gh` CLI commands work
   directly, and `git push` over HTTPS uses the gh credential helper (no
   separate token or SSH setup needed). If `gh auth status` fails, the host's
@@ -91,6 +93,8 @@ agentContext: |
 
   `sudo` is passwordless; use it for system package installs.
 
-  The omp binary self-extracts its native addons into `~/.omp/natives/` on
-  first run. If natives fail to load, ensure `~/.omp/natives/` is writable
-  and delete the version subdir to force re-extraction.
+  The omp `browser` tool (Puppeteer/Chromium) cannot spawn inside this microVM
+  (ENOEXEC on the bundled chrome-linux64 binary). For browser automation use the
+  installed `agent-browser` CLI instead (`agent-browser open <url>`, then
+  `snapshot`, `click @eN`, `screenshot`, etc.). For fetching static web content
+  (articles, docs, JSON, PDFs) prefer the `read` tool on a URL — no browser needed.
