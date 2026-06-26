@@ -354,6 +354,8 @@ cleanup() {
       *) ;;
     esac
   fi
+  # Always tear down the sbx sandbox instance on quit (ephemeral per session).
+  sbx rm -f "$SANDBOX_NAME" 2>/dev/null && log "${C_DIM}sandbox '${SANDBOX_NAME}' removed${C_RST}" || true
   exit $rc
 }
 
