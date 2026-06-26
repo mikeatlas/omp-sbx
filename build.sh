@@ -14,10 +14,15 @@ RELEASE_COOLDOWN_DAYS="${RELEASE_COOLDOWN_DAYS:-3}"
 
 # Colors (only when stderr is a tty)
 if [ -t 2 ]; then
-  C_DIM=$'\033[2m'; C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'; C_GREEN=$'\033[32m'; C_RST=$'\033[0m'
+  C_DIM=$'\033[2m'; C_CYAN=$'\033[36m'; C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'; C_GREEN=$'\033[32m'; C_BOLD=$'\033[1m'; C_RST=$'\033[0m'
 else
-  C_DIM=''; C_YELLOW=''; C_RED=''; C_GREEN=''; C_RST=''
+  C_DIM=''; C_CYAN=''; C_YELLOW=''; C_RED=''; C_GREEN=''; C_BOLD=''; C_RST=''
 fi
+
+# ── Preflight: ensure sbx CLI is installed ──────────────────────────────────
+# shellcheck source=sbx-preflight.sh
+source "$DIR/sbx-preflight.sh"
+ensure_sbx "build.sh"
 
 if [ -z "${OMP_VERSION:-}" ]; then
   echo ">> fetching latest omp release tag" >&2

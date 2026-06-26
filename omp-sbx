@@ -51,10 +51,9 @@ done
 if [ ${#OMP_ARGS[@]} -gt 0 ]; then set -- "${OMP_ARGS[@]}"; else set --; fi
 
 # ── Preflight ────────────────────────────────────────────────────────────────
-if ! command -v sbx >/dev/null 2>&1; then
-  log "${C_RED}omp-sbx: sbx CLI not found. Install: brew install docker/tap/sbx${C_RST}"
-  exit 1
-fi
+# shellcheck source=sbx-preflight.sh
+source "$REPO_DIR/sbx-preflight.sh"
+ensure_sbx "omp-sbx"
 
 if [ ! -d "$HOME/.omp" ]; then
   log "${C_RED}omp-sbx: host config dir not found: $HOME/.omp${C_RST}"
