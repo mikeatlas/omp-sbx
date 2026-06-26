@@ -32,6 +32,7 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
       fd-find fzf sqlite3 build-essential pkg-config libssl-dev \
       unzip xz-utils file less procps \
+      chromium-browser \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/fdfind /usr/local/bin/fd
 
@@ -54,11 +55,12 @@ RUN go install golang.org/x/tools/gopls@latest
 ENV PATH="/home/agent/go/bin:${PATH}"
 
 # ── agent-browser (browser automation for AI agents) ────────────────────────
-# Native Rust CLI with its own Chrome for Testing — replaces the omp `browser`
-# (Puppeteer) tool, which cannot spawn Chromium inside the sbx microVM.
-# `install` downloads Chrome + Linux browser deps.
+# Native Rust CLI — replaces the omp `browser` (Puppeteer) tool, which cannot
+# spawn Chromium inside the sbx microVM. Chrome for Testing has no Linux ARM64
+# builds, so we use the system chromium-browser (installed above via apt) and
+# point agent-browser at it via AGENT_BROWSER_EXECUTABLE_PATH.
 RUN npm install -g agent-browser
-RUN agent-browser install
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 # ── omp prebuilt binary ──────────────────────────────────────────────────────
 # Self-extracts pi_natives.linux-<arch>.node into ~/.omp/natives/<version>/

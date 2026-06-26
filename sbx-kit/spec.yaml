@@ -96,5 +96,7 @@ agentContext: |
   The omp `browser` tool (Puppeteer/Chromium) cannot spawn inside this microVM
   (ENOEXEC on the bundled chrome-linux64 binary). For browser automation use the
   installed `agent-browser` CLI instead (`agent-browser open <url>`, then
-  `snapshot`, `click @eN`, `screenshot`, etc.). For fetching static web content
-  (articles, docs, JSON, PDFs) prefer the `read` tool on a URL — no browser needed.
+  `snapshot`, `click @eN`, `screenshot`, etc.). It uses the system
+  chromium-browser (`AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser`).
+  For fetching static web content (articles, docs, JSON, PDFs) prefer the `read`
+  tool on a URL — no browser needed.

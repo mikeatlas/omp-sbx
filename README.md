@@ -116,7 +116,7 @@ omp starts LSP servers **lazily**, keyed on `fileTypes` matching actual files in
 
 ### Browser automation (agent-browser)
 
-The omp `browser` tool (Puppeteer/Chromium) **cannot spawn inside the sbx microVM** — the bundled `chrome-linux64` binary fails with `ENOEXEC`. The template instead ships [`agent-browser`](https://github.com/vercel-labs/agent-browser), a native Rust CLI that downloads its own Chrome for Testing and installs Linux browser dependencies at build time.
+The omp `browser` tool (Puppeteer/Chromium) **cannot spawn inside the sbx microVM** — the bundled `chrome-linux64` binary fails with `ENOEXEC`. The template instead ships [`agent-browser`](https://github.com/vercel-labs/agent-browser), a native Rust CLI. Chrome for Testing has no Linux ARM64 builds, so the template installs `chromium-browser` via apt and points agent-browser at it via `AGENT_BROWSER_EXECUTABLE_PATH`.
 
 ```bash
 agent-browser open https://example.com      # launch + navigate
@@ -129,7 +129,7 @@ agent-browser close
 
 For **static content** (articles, docs, GitHub issues/PRs, JSON, PDFs) no browser is needed — the omp `read` tool fetches clean text/markdown from a URL directly. Reach for `agent-browser` only when JS execution or interaction is required.
 
-Changing the `agent-browser` version or its Chrome download requires a rebuild (`./build.sh`) + `omp --new`.
+Changing the `agent-browser` version or system Chromium requires a rebuild (`./build.sh`) + `omp --new`.
 
 ### Security
 
