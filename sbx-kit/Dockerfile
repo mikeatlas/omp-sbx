@@ -2,7 +2,7 @@
 ###############################################################################
 # omp-sbx-template — custom sandbox template for the omp coding agent.
 #
-# Extends docker/sandbox-templates:shell, which already provides:
+# Extends docker/sandbox-templates:shell-nightly, which already provides:
 #   • Ubuntu 26.04, non-root `agent` user (UID 1000) with passwordless sudo
 #   • tini as PID 1, /home/agent/workspace as working dir
 #   • Node.js 22, Python 3.14, Go, Java, Git, Docker CLI, ripgrep, jq
@@ -24,7 +24,7 @@
 #   sbx run --kit ./sbx-kit --template omp-sbx:latest omp
 ###############################################################################
 
-FROM docker/sandbox-templates:shell
+FROM docker/sandbox-templates:shell-nightly
 
 USER root
 

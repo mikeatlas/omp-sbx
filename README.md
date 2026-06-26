@@ -47,7 +47,7 @@ omp "fix the bug"      # one-shot prompt
 
 | Component | File | Purpose |
 |---|---|---|
-| Template | `sbx-kit/Dockerfile` | Extends `docker/sandbox-templates:shell` with omp binary + dev tools |
+| Template | `sbx-kit/Dockerfile` | Extends `docker/sandbox-templates:shell-nightly` with omp binary + dev tools |
 | Kit | `sbx-kit/spec.yaml` | Defines omp entrypoint, network allow-list, env, agent context |
 | Launcher | `omp-sbx` | Wrapper handling banner, sandbox lifecycle, resume vs new |
 | Parallel | `omp-sbx-parallel` | Git worktree-based parallel sandbox launcher |
