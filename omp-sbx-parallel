@@ -374,18 +374,29 @@ sandbox_exists() {
 # The main repo's .git dir is mounted rw so git worktree operations (commit,
 # branch, log, push) work inside the container.
 if [ "$#" -eq 0 ] && [ -t 0 ]; then
-  # Interactive TUI.
+  # Interactive TUI — install the cleanup trap once so it covers every exit
+  # path (create failure, re-attach failure, or clean session end).
+  trap cleanup EXIT
   if ! sandbox_exists "$SANDBOX_NAME"; then
-    # Phase 1: create the sandbox (warnings visible on stderr).
-    trap cleanup EXIT
-    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
-      omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git" 2>&1 || {
-      log "${C_RED}omp-sbx-parallel: failed to create sandbox${C_RST}"
-      exit 1
-    }
-    sleep 2
-  else
-    trap cleanup EXIT
+    # Phase 1: create the sandbox, surfacing warnings on stderr. Capture the
+    # output so a failed create can be classified: a "name already taken"
+    # error is a false negative from sandbox_exists — after a force-quit the
+    # sandbox is left stopped, and sbx ls may omit stopped sandboxes, so the
+    # name match missed it and create collided with the existing name.
+    # Recover by re-attaching (Phase 3) instead of erroring out.
+    if create_out="$(sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
+        omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git" 2>&1)"; then
+      if [ -n "$create_out" ]; then printf '%s\n' "$create_out" >&2; fi
+      sleep 2
+    else
+      if [ -n "$create_out" ]; then printf '%s\n' "$create_out" >&2; fi
+      if printf '%s' "$create_out" | grep -qiE 'already exists|given new workspaces'; then
+        log "${C_DIM}omp-sbx-parallel: sandbox already exists (stopped?), will re-attach${C_RST}"
+      else
+        log "${C_RED}omp-sbx-parallel: failed to create sandbox${C_RST}"
+        exit 1
+      fi
+    fi
   fi
 
   # Phase 2: pause so the user can read sbx warnings before omp clears screen.
@@ -396,20 +407,38 @@ if [ "$#" -eq 0 ] && [ -t 0 ]; then
     log ""
   fi
 
-  # Phase 3: attach to the sandbox TUI.
-  sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1 || {
-    log "${C_DIM}omp-sbx-parallel: sandbox not found, creating new...${C_RST}"
-    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
-      omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git" 2>&1
-    sleep 2
-    exec sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME"
-  }
+  # Phase 3: attach to the sandbox TUI. sbx run --name re-attaches to a running
+  # agent or restarts a stopped sandbox's agent. If re-attach fails (a
+  # force-quit can leave the agent process wedged), stop+restart; last resort
+  # rm+recreate. omp session state lives in the shared ~/.omp mount, so the
+  # conversation resumes even across a recreate.
+  if ! sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1; then
+    log "${C_DIM}omp-sbx-parallel: re-attach failed; restarting sandbox...${C_RST}"
+    sbx stop "$SANDBOX_NAME" >/dev/null 2>&1 || true
+    if ! sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1; then
+      log "${C_DIM}omp-sbx-parallel: sandbox unresponsive, recreating...${C_RST}"
+      sbx rm -f "$SANDBOX_NAME" >/dev/null 2>&1 || true
+      if ! sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
+          omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git" 2>&1; then
+        log "${C_RED}omp-sbx-parallel: failed to create sandbox${C_RST}"
+        exit 1
+      fi
+      sleep 2
+      exec sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME"
+    fi
+  fi
 else
   # Non-interactive — create if needed, then exec omp with args.
   if ! sandbox_exists "$SANDBOX_NAME"; then
-    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
-      omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git" >/dev/null 2>&1
-    sleep 2
+    # Same false-negative recovery as interactive mode: a create failure here
+    # is usually a name collision with a stopped sandbox left by a force-quit.
+    # sbx exec starts a stopped sandbox, so fall through and let it run.
+    if ! sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
+        omp "$WORKTREE_PATH" "$HOME/.omp" "${REPO_ROOT}/.git" >/dev/null 2>&1; then
+      : # already exists or transient — sbx exec surfaces real errors
+    else
+      sleep 2
+    fi
   fi
   exec sbx exec "$SANDBOX_NAME" omp "$@"
 fi

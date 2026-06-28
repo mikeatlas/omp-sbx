@@ -11,6 +11,7 @@ Run the [omp coding agent](https://omp.sh) (oh-my-pi) inside a [Docker sbx](http
 - Launches omp inside a Docker sbx microVM — sbx handles all security (non-root user, network policies, secret proxy, resource limits)
 - Bind-mounts your `~/.omp` (agent.db, managed-skills, memories, sessions) so state persists across sandbox restarts
 - Sandboxes are per-directory: running from the same cwd reconnects to the same sandbox
+- Recovers automatically after a force-quit: if the sandbox is left stopped (or its agent wedged), the launcher re-attaches, then stops+restarts, and as a last resort recreates the sandbox — your omp session resumes from the shared `~/.omp` either way
 - `--new` flag forces a fresh sandbox
 
 ## Prerequisites

@@ -114,14 +114,26 @@ log ""
 if [ "$#" -eq 0 ] && [ -t 0 ]; then
   # Interactive TUI.
   if ! $EXISTS; then
-    # Phase 1: create the sandbox (warnings visible on stderr).
-    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
-      omp "$WORKDIR" "${MOUNTS[@]}" 2>&1 || {
-      log "${C_RED}omp-sbx: failed to create sandbox${C_RST}"
-      exit 1
-    }
-    # Wait for startup commands (symlink creation) to complete.
-    sleep 2
+    # Phase 1: create the sandbox, surfacing warnings on stderr. Capture the
+    # output so a failed create can be classified: a "name already taken"
+    # error is a false negative from sandbox_exists — after a force-quit the
+    # sandbox is left stopped, and sbx ls may omit stopped sandboxes, so our
+    # name match missed it and we tried to create over an existing name.
+    # Recover by re-attaching (Phase 3) instead of erroring out.
+    if create_out="$(sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
+        omp "$WORKDIR" "${MOUNTS[@]}" 2>&1)"; then
+      if [ -n "$create_out" ]; then printf '%s\n' "$create_out" >&2; fi
+      # Wait for startup commands (symlink creation) to complete.
+      sleep 2
+    else
+      if [ -n "$create_out" ]; then printf '%s\n' "$create_out" >&2; fi
+      if printf '%s' "$create_out" | grep -qiE 'already exists|given new workspaces'; then
+        log "${C_DIM}omp-sbx: sandbox already exists (stopped?), will re-attach${C_RST}"
+      else
+        log "${C_RED}omp-sbx: failed to create sandbox${C_RST}"
+        exit 1
+      fi
+    fi
   fi
 
   # Phase 2: pause so the user can read sbx warnings before omp clears screen.
@@ -133,19 +145,38 @@ if [ "$#" -eq 0 ] && [ -t 0 ]; then
   fi
 
   # Phase 3: attach to the sandbox TUI. Must pass --kit so sbx knows the "omp"
-  # agent definition (it's not a built-in agent). Fall back to creating if stale.
-  sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1 || {
-    log "${C_DIM}omp-sbx: sandbox not found, creating new...${C_RST}"
-    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
-      omp "$WORKDIR" "${MOUNTS[@]}" 2>&1
-    sleep 2
-    exec sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME"
-  }
+  # agent definition (it's not a built-in agent). sbx run --name re-attaches to
+  # a running agent, or restarts a stopped sandbox's agent. If re-attach fails
+  # (a force-quit can leave the agent process wedged), stop+restart the sandbox;
+  # omp session state lives in the shared ~/.omp mount so the conversation
+  # resumes. Last resort: remove + recreate.
+  if ! sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1; then
+    log "${C_DIM}omp-sbx: re-attach failed; restarting sandbox...${C_RST}"
+    sbx stop "$SANDBOX_NAME" >/dev/null 2>&1 || true
+    if ! sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1; then
+      log "${C_DIM}omp-sbx: sandbox unresponsive, recreating...${C_RST}"
+      sbx rm -f "$SANDBOX_NAME" >/dev/null 2>&1 || true
+      if ! sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
+          omp "$WORKDIR" "${MOUNTS[@]}" 2>&1; then
+        log "${C_RED}omp-sbx: failed to create sandbox${C_RST}"
+        exit 1
+      fi
+      sleep 2
+      exec sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME"
+    fi
+  fi
 else
   # Non-interactive — create if needed, then exec omp with args.
   if ! $EXISTS; then
-    sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" omp "$WORKDIR" "${MOUNTS[@]}" >/dev/null 2>&1
-    sleep 2
+    # Same false-negative recovery as interactive mode: a create failure here
+    # is usually a name collision with a stopped sandbox left by a force-quit.
+    # sbx exec starts a stopped sandbox, so fall through and let it run.
+    if ! sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
+        omp "$WORKDIR" "${MOUNTS[@]}" >/dev/null 2>&1; then
+      : # already exists or transient — sbx exec surfaces real errors
+    else
+      sleep 2
+    fi
   fi
   exec sbx exec "$SANDBOX_NAME" omp "$@"
 fi
