@@ -41,23 +41,51 @@ commands:
             rm -rf /home/agent/workspace
             ln -sf "$WS_HOST" /home/agent/workspace
           fi
-          # ── Morph plugin setup (if installed in the image) ─────────────────
+          # ── Morph plugin setup (if installed in the image) ─────────────
           # Links pi-morphllm-plugin into ~/.omp/plugins (persists via host
           # mount), creates morph config from the image template, and injects
-          # the OpenRouter API key extracted from omp's auth store.
+          # an API key into morph.env.
+          #
+          # Key selection (first match wins):
+          #   1. MORPH_API_KEY env var → native Morph endpoint (all tools work)
+          #   2. OpenRouter key from omp auth store → OpenRouter endpoint
+          #      (morph_fastapply only; WarpGrep/compaction need Morph's API)
           MORPH_PKG="$(npm root -g 2>/dev/null)/pi-morphllm-plugin"
           if [ -d "$MORPH_PKG" ]; then
             # Link the plugin if not already registered in the lockfile
             if ! grep -q pi-morphllm-plugin "$HOME/.omp/plugins/omp-plugins.lock.json" 2>/dev/null; then
               omp plugin link "$MORPH_PKG" 2>/dev/null || true
             fi
-            # Create morph config from template (ephemeral — recreated each start)
-            mkdir -p "$HOME/.pi/agent"
-            [ -f "$HOME/.pi/agent/morph.json" ] || cp /opt/morph-config/morph.json "$HOME/.pi/agent/morph.json"
-            # Inject OpenRouter key from omp's auth store into morph.env
-            OR_KEY=$(omp token openrouter 2>/dev/null)
-            if [ -n "$OR_KEY" ]; then
-              echo "$OR_KEY" > "$HOME/.pi/agent/morph.env"
+            # Morph config persists in ~/.omp/morph (host-mounted) so it survives
+            # sandbox restarts; symlinks expose it at ~/.pi/agent where the plugin
+            # reads it. Recreated each start — cheap and idempotent.
+            MORPH_CFG_DIR="$HOME/.omp/morph"
+            mkdir -p "$MORPH_CFG_DIR" "$HOME/.pi/agent"
+            [ -f "$MORPH_CFG_DIR/morph.json" ] || cp /opt/morph-config/morph.json "$MORPH_CFG_DIR/morph.json"
+            ln -sf "$MORPH_CFG_DIR/morph.json" "$HOME/.pi/agent/morph.json"
+            ln -sf "$MORPH_CFG_DIR/morph.env" "$HOME/.pi/agent/morph.env"
+            # Inject API key (first match wins). Guard against an unresolved
+            # ${MORPH_API_KEY} template — sbx leaves it literal when the host env
+            # var is unset; treat that as unset and fall back to OpenRouter.
+            MORPH_KEY=""
+            case "${MORPH_API_KEY:-}" in
+              '${'*|"") : ;;
+              *) MORPH_KEY="$MORPH_API_KEY" ;;
+            esac
+            if [ -n "$MORPH_KEY" ]; then
+              # Native Morph key → all tools (FastApply, WarpGrep, compaction)
+              printf '%s\n' "$MORPH_KEY" > "$MORPH_CFG_DIR/morph.env"
+              chmod 600 "$MORPH_CFG_DIR/morph.env"
+              sed -i 's|"baseUrl": "[^"]*"|"baseUrl": "https://api.morphllm.com"|' "$MORPH_CFG_DIR/morph.json"
+            else
+              # Fall back to OpenRouter key → FastApply only
+              OR_KEY=$(omp token openrouter 2>/dev/null)
+              if [ -n "$OR_KEY" ]; then
+                printf '%s\n' "$OR_KEY" > "$MORPH_CFG_DIR/morph.env"
+                chmod 600 "$MORPH_CFG_DIR/morph.env"
+                # OpenRouter endpoint (no /v1 — the SDK appends it)
+                sed -i 's|"baseUrl": "[^"]*"|"baseUrl": "https://openrouter.ai/api"|' "$MORPH_CFG_DIR/morph.json"
+              fi
             fi
           fi
           # If morph was removed from the image but a stale link remains, clean it up
@@ -81,6 +109,10 @@ network:
     - "github.com:443"
     - "*.githubusercontent.com:443"
     - "raw.githubusercontent.com:443"
+    # Morph API (pi-morphllm-plugin — FastApply, compaction, WarpGrep model calls)
+    - "api.morphllm.com:443"
+    # Morph code search service (WarpGrep GitHub — repo import/indexing)
+    - "morphllm.com:443"
     # Package registries (npm, pip, cargo)
     - "registry.npmjs.org:443"
     - "pypi.org:443"
@@ -91,8 +123,6 @@ network:
     - "*.context7.com:443"
     - "code.visualstudio.com:443"
     - "*.cloudflare.com:443"
-    # Morph API (pi-morphllm-plugin — calls Morph endpoints via baseUrl)
-    - "api.morphllm.com:443"
     # Playwright browser downloads (runtime browser install/upgrade)
     - "cdn.playwright.dev:443"
     - "playwright.download.prss.microsoft.com:443"
@@ -108,6 +138,11 @@ environment:
     AGENT_BROWSER_EXECUTABLE_PATH: "/usr/local/bin/chromium"
     # sbx TLS proxy intercepts HTTPS — ignore cert errors for headless browsing
     AGENT_BROWSER_IGNORE_HTTPS_ERRORS: "true"
+    # Native Morph API key (optional — enables the full Morph toolset).
+    # omp-sbx sources .env (MORPH_API_KEY=sk-...) before creating the sandbox,
+    # so sbx substitutes it here. Without it, falls back to OpenRouter
+    # (morph_fastapply only). You can also pass --env to sbx directly.
+    MORPH_API_KEY: "${MORPH_API_KEY}"
 
 # ── Agent context (appended to AGENTS.md) ────────────────────────────────────
 agentContext: |
@@ -136,8 +171,8 @@ agentContext: |
 
   The pi-morphllm-plugin is installed (if built with `INSTALL_MORPH_PLUGIN=1`).
   It adds `morph_fastapply`, `warpgrep_codebase_search`, and
-  `warpgrep_github_search` tools plus Morph compaction. The config at
-  `~/.pi/agent/morph.json` is configured to use OpenRouter as the endpoint
-  with your OpenRouter API key injected from omp's auth store. Morph-proprietary
-  API calls (FastApply, WarpGrep) will fail without a Morph API key — native
-  omp tools are used as fallback. Run `/morph_status` to check the plugin state.
+  `warpgrep_github_search` tools plus Morph compaction. The startup script
+  prefers a native Morph API key (`MORPH_API_KEY` env var) — all tools work
+  with Morph's API. Without one, it falls back to your OpenRouter key
+  (morph_fastapply only; WarpGrep and compaction need Morph's API). Run
+  `/morph_status` to check the active provider and tool state.

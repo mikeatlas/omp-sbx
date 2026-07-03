@@ -2,7 +2,7 @@
   "apiKey": "multiple",
   "apiKeyFile": "~/.pi/agent/morph.env",
   "apiKeyStrategy": "round-robin",
-  "baseUrl": "https://openrouter.ai/api/v1",
+  "baseUrl": "https://api.morphllm.com",
   "editEnabled": true,
   "warpgrepEnabled": true,
   "warpgrepGithubEnabled": true,

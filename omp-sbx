@@ -54,6 +54,11 @@ if [ ${#OMP_ARGS[@]} -gt 0 ]; then set -- "${OMP_ARGS[@]}"; else set --; fi
 # shellcheck source=sbx-preflight.sh
 source "$REPO_DIR/sbx-preflight.sh"
 ensure_sbx "omp-sbx"
+# Source .env if present (gitignored — copy from .env.example).
+# Exports MORPH_API_KEY etc. so sbx can substitute ${MORPH_API_KEY} in spec.yaml.
+if [ -f "$REPO_DIR/.env" ]; then
+  set -a; source "$REPO_DIR/.env"; set +a
+fi
 
 if [ ! -d "$HOME/.omp" ]; then
   log "${C_RED}omp-sbx: host config dir not found: $HOME/.omp${C_RST}"

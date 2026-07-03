@@ -138,56 +138,34 @@ Changing the `agent-browser` or Playwright Chromium version requires a rebuild (
 
 ### Morph plugin (pi-morphllm-plugin, opt-in)
 
-[`pi-morphllm-plugin`](https://github.com/rickicode/pi-morphllm-plugin) is a runtime extension that adds `morph_fastapply`, `warpgrep_codebase_search`, `warpgrep_github_search` tools and Morph compaction to omp. It is **opt-in** — the default build does not include it.
+[`pi-morphllm-plugin`](https://github.com/rickicode/pi-morphllm-plugin) adds four Morph-powered capabilities to omp: `morph_fastapply` (partial-snippet edits), `warpgrep_codebase_search` (local codebase search), `warpgrep_github_search` (public GitHub source search), and Morph compaction. It's **opt-in** — the default build excludes it.
 
-**Enable morph (persistent):** Copy the sample env and flip the flag, then rebuild:
+**Enable:** set `INSTALL_MORPH_PLUGIN=1` and rebuild.
 
 ```bash
-cp .env.example .env
-# Edit .env: set INSTALL_MORPH_PLUGIN=1
+cp .env.example .env      # then edit: INSTALL_MORPH_PLUGIN=1
 ./build.sh
 ```
 
-`.env` is gitignored — your preference is local. `build.sh` sources it automatically. You can also override inline:
+`.env` is gitignored. Both `build.sh` and `omp-sbx` source it, so a key set there reaches the sandbox automatically. Disable per-project without rebuilding: `omp plugin disable pi-morphllm-plugin`.
 
-```bash
-INSTALL_MORPH_PLUGIN=1 ./build.sh   # one-shot enable
-./build.sh                           # uses .env or defaults to 0 (no morph)
-```
+#### API key (first match wins)
 
-You can also disable an already-installed plugin per-project without rebuilding:
+1. **`MORPH_API_KEY`** in `.env` → native Morph endpoint (`api.morphllm.com`). **All four tools work.** Get a key at [morphllm.com](https://morphllm.com).
+2. **OpenRouter key** (from omp's auth store via `omp token openrouter`) → OpenRouter endpoint. Only `morph_fastapply` works; the others need Morph's proprietary API and fall back to native omp tools.
 
-```bash
-omp plugin disable pi-morphllm-plugin
-```
+Routing is `prefer` with `fallbackToNativeTools: true`, so Morph failures degrade gracefully to native omp tools. The config persists in `~/.omp/morph/` (host-mounted) and is symlinked into `~/.pi/agent/` at each start, so it survives sandbox restarts.
 
-#### OpenRouter configuration
-
-When morph is enabled, the startup script automatically:
-
-1. Links the plugin into `~/.omp/plugins` (persists across sandbox restarts via the host mount).
-2. Creates `~/.pi/agent/morph.json` from the image template, configured to use OpenRouter as the endpoint (`baseUrl: https://openrouter.ai/api/v1`).
-3. Extracts your OpenRouter API key from omp's auth store (`omp token openrouter`) and writes it to `~/.pi/agent/morph.env`.
-
-The routing mode is set to `prefer` (not `force`) with `fallbackToNativeTools: true`, so Morph tool failures fall back to native omp tools gracefully.
-
-**Important limitation:** Morph's tools (FastApply, WarpGrep, compaction) call Morph's proprietary API at `api.morphllm.com`. OpenRouter does not implement Morph's API — these calls will fail (404) and fall back to native omp tools. To enable the full Morph toolset, get a Morph API key from [morphllm.com](https://morphllm.com) and set it in `~/.pi/agent/morph.env`:
-
-```bash
-echo "sk-morph-..." > ~/.pi/agent/morph.env
-```
-
-Then set `"baseUrl": "https://api.morphllm.com"` in `~/.pi/agent/morph.json` (or remove the `baseUrl` field to use the default). Run `/morph_status` inside omp to verify.
-
-#### Config file locations
-
-| File | Path | Purpose |
+| Tool | Morph key | OpenRouter key |
 |---|---|---|
-| morph.json | `~/.pi/agent/morph.json` | Plugin config (ephemeral — recreated from template at each sandbox start) |
-| morph.env | `~/.pi/agent/morph.env` | API key(s) — one per line (regenerated from omp auth at each start) |
-| Template | `/opt/morph-config/morph.json` | Image-baked default config (the source for the ephemeral copy) |
+| `morph_fastapply` | ✅ | ✅ (`morph/morph-v3-large`) |
+| `warpgrep_codebase_search` | ✅ | ❌ |
+| `warpgrep_github_search` | ✅ | ❌ |
+| Morph compaction | ✅ | ❌ |
 
-Changing the morph.json template requires a rebuild. Editing `~/.pi/agent/morph.json` directly takes effect on the next session reload (no rebuild needed).
+> **Note:** `warpgrep_github_search` calls `morphllm.com` (Vercel-hosted), which may return a 429 security checkpoint from some network egress IPs — including the sbx proxy. The other three tools use `api.morphllm.com` and are unaffected. The tool is correctly configured and works when the endpoint is reachable.
+
+**Verify:** run `/morph_status` (provider + tool state) or `/morph_selftest` (live calls to all four) inside omp. If the morph config is missing after a resume, recreate the sandbox with `omp-sbx --new`.
 
 ### Security
 
