@@ -12,7 +12,8 @@
 #   • omp prebuilt binary (self-extracts pi_natives on first run)
 #   • bun, uv (for the pi kernel + python skills)
 #   • LSP servers (pyright, typescript-language-server, bash-language-server, gopls)
-#   • agent-browser (browser automation for AI agents — replaces Puppeteer, which can't spawn in sbx)
+#   • agent-browser + Playwright Chromium (browser automation — replaces Puppeteer, which can't spawn in sbx)
+#   • pi-morphllm-plugin (optional, opt-in via INSTALL_MORPH_PLUGIN=1 build arg)
 #   • Missing dev tools (fd, fzf, sqlite3, build-essential)
 #
 # Build + load into sbx:
@@ -32,7 +33,10 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
       fd-find fzf sqlite3 build-essential pkg-config libssl-dev \
       unzip xz-utils file less procps \
-      chromium-browser \
+      libglib2.0-0t64 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 \
+      libxcb1 libxkbcommon0 libasound2t64 libgbm1 libx11-6 libxext6 \
+      libcairo2 libpango-1.0-0 libxcomposite1 libxdamage1 libxfixes3 \
+      libxrandr2 libatspi2.0-0t64 libnss3 libnspr4 libdrm2 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/fdfind /usr/local/bin/fd
 
@@ -54,13 +58,22 @@ RUN npm install -g pyright typescript-language-server typescript bash-language-s
 RUN go install golang.org/x/tools/gopls@latest
 ENV PATH="/home/agent/go/bin:${PATH}"
 
-# ── agent-browser (browser automation for AI agents) ────────────────────────
-# Native Rust CLI — replaces the omp `browser` (Puppeteer) tool, which cannot
-# spawn Chromium inside the sbx microVM. Chrome for Testing has no Linux ARM64
-# builds, so we use the system chromium-browser (installed above via apt) and
-# point agent-browser at it via AGENT_BROWSER_EXECUTABLE_PATH.
+# ── agent-browser + Chromium (Playwright build) ──────────────────────────────
+# agent-browser is a native Rust CLI for AI browser automation. The omp
+# `browser` tool (Puppeteer/Chromium) cannot spawn inside the sbx microVM
+# (ENOEXEC on the bundled chrome-linux64 binary). Ubuntu's chromium-browser
+# apt package is a snap stub that also fails in containers. Playwright ships a
+# real Chromium with Linux ARM64 builds — install it and symlink to a stable
+# path so agent-browser can find it via AGENT_BROWSER_EXECUTABLE_PATH.
 RUN npm install -g agent-browser
-ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+RUN npx playwright@1.61.1 install chromium
+# Symlink Playwright Chromium into /usr/local/bin (requires root).
+# The glob resolves at build time after the download completes.
+USER root
+RUN ln -sf /home/agent/.cache/ms-playwright/chromium-*/chrome-linux/chrome \
+           /usr/local/bin/chromium
+USER agent
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/local/bin/chromium
 
 # ── omp prebuilt binary ──────────────────────────────────────────────────────
 # Self-extracts pi_natives.linux-<arch>.node into ~/.omp/natives/<version>/
@@ -76,6 +89,20 @@ RUN ARCH="$(uname -m)" && \
       -o /home/agent/.local/bin/omp && \
     chmod +x /home/agent/.local/bin/omp && \
     omp --version
+
+# ── pi-morphllm-plugin (optional, opt-in via build arg) ─────────────────────
+# Morph runtime extension: adds morph_fastapply, warpgrep_codebase_search,
+# warpgrep_github_search tools + Morph compaction. Opt out by building with
+# INSTALL_MORPH_PLUGIN=0 (the default). When enabled, the npm package is
+# installed globally and the startup script links it + writes morph.json.
+# See README "Morph plugin" section for configuration details.
+ARG INSTALL_MORPH_PLUGIN=0
+RUN if [ "${INSTALL_MORPH_PLUGIN}" = "1" ]; then \
+      npm install -g pi-morphllm-plugin; \
+    else \
+      echo ">> morph plugin install skipped (INSTALL_MORPH_PLUGIN=${INSTALL_MORPH_PLUGIN})"; \
+    fi
+COPY sbx-kit/morph.json.template /opt/morph-config/morph.json
 
 # ── Environment ──────────────────────────────────────────────────────────────
 ENV PI_CONFIG_DIR=.omp \

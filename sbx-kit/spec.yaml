@@ -41,8 +41,31 @@ commands:
             rm -rf /home/agent/workspace
             ln -sf "$WS_HOST" /home/agent/workspace
           fi
+          # ── Morph plugin setup (if installed in the image) ─────────────────
+          # Links pi-morphllm-plugin into ~/.omp/plugins (persists via host
+          # mount), creates morph config from the image template, and injects
+          # the OpenRouter API key extracted from omp's auth store.
+          MORPH_PKG="$(npm root -g 2>/dev/null)/pi-morphllm-plugin"
+          if [ -d "$MORPH_PKG" ]; then
+            # Link the plugin if not already registered in the lockfile
+            if ! grep -q pi-morphllm-plugin "$HOME/.omp/plugins/omp-plugins.lock.json" 2>/dev/null; then
+              omp plugin link "$MORPH_PKG" 2>/dev/null || true
+            fi
+            # Create morph config from template (ephemeral — recreated each start)
+            mkdir -p "$HOME/.pi/agent"
+            [ -f "$HOME/.pi/agent/morph.json" ] || cp /opt/morph-config/morph.json "$HOME/.pi/agent/morph.json"
+            # Inject OpenRouter key from omp's auth store into morph.env
+            OR_KEY=$(omp token openrouter 2>/dev/null)
+            if [ -n "$OR_KEY" ]; then
+              echo "$OR_KEY" > "$HOME/.pi/agent/morph.env"
+            fi
+          fi
+          # If morph was removed from the image but a stale link remains, clean it up
+          if [ ! -d "$MORPH_PKG" ] && grep -q pi-morphllm-plugin "$HOME/.omp/plugins/omp-plugins.lock.json" 2>/dev/null; then
+            omp plugin uninstall pi-morphllm-plugin 2>/dev/null || true
+          fi
       user: "1000"
-      description: Symlink host mounts and configure gh credential helper for git push
+      description: Symlink host mounts, configure gh credential helper, set up Morph plugin
 
 # ── Network ──────────────────────────────────────────────────────────────────
 # omp needs to reach model API providers. The sbx proxy injects API keys from
@@ -68,6 +91,11 @@ network:
     - "*.context7.com:443"
     - "code.visualstudio.com:443"
     - "*.cloudflare.com:443"
+    # Morph API (pi-morphllm-plugin — calls Morph endpoints via baseUrl)
+    - "api.morphllm.com:443"
+    # Playwright browser downloads (runtime browser install/upgrade)
+    - "cdn.playwright.dev:443"
+    - "playwright.download.prss.microsoft.com:443"
 
 # ── Environment ──────────────────────────────────────────────────────────────
 # PI_CONFIG_DIR=.omp makes omp use ~/.omp (the symlink to the host mount).
@@ -76,6 +104,10 @@ environment:
     PI_CONFIG_DIR: ".omp"
     HOME: "/home/agent"
     GH_CONFIG_DIR: "/home/agent/.config/gh"
+    # agent-browser: Playwright Chromium binary (stable symlink in the image)
+    AGENT_BROWSER_EXECUTABLE_PATH: "/usr/local/bin/chromium"
+    # sbx TLS proxy intercepts HTTPS — ignore cert errors for headless browsing
+    AGENT_BROWSER_IGNORE_HTTPS_ERRORS: "true"
 
 # ── Agent context (appended to AGENTS.md) ────────────────────────────────────
 agentContext: |
@@ -96,7 +128,16 @@ agentContext: |
   The omp `browser` tool (Puppeteer/Chromium) cannot spawn inside this microVM
   (ENOEXEC on the bundled chrome-linux64 binary). For browser automation use the
   installed `agent-browser` CLI instead (`agent-browser open <url>`, then
-  `snapshot`, `click @eN`, `screenshot`, etc.). It uses the system
-  chromium-browser (`AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser`).
-  For fetching static web content (articles, docs, JSON, PDFs) prefer the `read`
-  tool on a URL — no browser needed.
+  `snapshot`, `click @eN`, `screenshot`, etc.). It uses a real Chromium
+  installed via Playwright (`AGENT_BROWSER_EXECUTABLE_PATH=/usr/local/bin/chromium`).
+  The sbx TLS proxy intercepts HTTPS, so `AGENT_BROWSER_IGNORE_HTTPS_ERRORS` is
+  set — cert errors are ignored automatically. For fetching static web content
+  (articles, docs, JSON, PDFs) prefer the `read` tool on a URL — no browser needed.
+
+  The pi-morphllm-plugin is installed (if built with `INSTALL_MORPH_PLUGIN=1`).
+  It adds `morph_fastapply`, `warpgrep_codebase_search`, and
+  `warpgrep_github_search` tools plus Morph compaction. The config at
+  `~/.pi/agent/morph.json` is configured to use OpenRouter as the endpoint
+  with your OpenRouter API key injected from omp's auth store. Morph-proprietary
+  API calls (FastApply, WarpGrep) will fail without a Morph API key — native
+  omp tools are used as fallback. Run `/morph_status` to check the plugin state.

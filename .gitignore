@@ -1,3 +1,4 @@
 .vscode/
 .history/
 *.code-workspace
+.env

@@ -121,7 +121,7 @@ omp starts LSP servers **lazily**, keyed on `fileTypes` matching actual files in
 
 ### Browser automation (agent-browser)
 
-The omp `browser` tool (Puppeteer/Chromium) **cannot spawn inside the sbx microVM** — the bundled `chrome-linux64` binary fails with `ENOEXEC`. The template instead ships [`agent-browser`](https://github.com/vercel-labs/agent-browser), a native Rust CLI. Chrome for Testing has no Linux ARM64 builds, so the template installs `chromium-browser` via apt and points agent-browser at it via `AGENT_BROWSER_EXECUTABLE_PATH`.
+The omp `browser` tool (Puppeteer/Chromium) **cannot spawn inside the sbx microVM** — the bundled `chrome-linux64` binary fails with `ENOEXEC`. The template instead ships [`agent-browser`](https://github.com/vercel-labs/agent-browser), a native Rust CLI, paired with a real Chromium installed via **Playwright** (which provides Linux ARM64 builds, unlike Chrome for Testing or Ubuntu's `chromium-browser` snap stub).
 
 ```bash
 agent-browser open https://example.com      # launch + navigate
@@ -132,9 +132,62 @@ agent-browser screenshot page.png            # capture
 agent-browser close
 ```
 
-For **static content** (articles, docs, GitHub issues/PRs, JSON, PDFs) no browser is needed — the omp `read` tool fetches clean text/markdown from a URL directly. Reach for `agent-browser` only when JS execution or interaction is required.
+The sbx TLS proxy intercepts HTTPS, so `AGENT_BROWSER_IGNORE_HTTPS_ERRORS=true` is set in `spec.yaml` to avoid cert errors. For **static content** (articles, docs, GitHub issues/PRs, JSON, PDFs) no browser is needed — the omp `read` tool fetches clean text/markdown from a URL directly. Reach for `agent-browser` only when JS execution or interaction is required.
 
-Changing the `agent-browser` version or system Chromium requires a rebuild (`./build.sh`) + `omp --new`.
+Changing the `agent-browser` or Playwright Chromium version requires a rebuild (`./build.sh`) + `omp --new`.
+
+### Morph plugin (pi-morphllm-plugin, opt-in)
+
+[`pi-morphllm-plugin`](https://github.com/rickicode/pi-morphllm-plugin) is a runtime extension that adds `morph_fastapply`, `warpgrep_codebase_search`, `warpgrep_github_search` tools and Morph compaction to omp. It is **opt-in** — the default build does not include it.
+
+**Enable morph (persistent):** Copy the sample env and flip the flag, then rebuild:
+
+```bash
+cp .env.example .env
+# Edit .env: set INSTALL_MORPH_PLUGIN=1
+./build.sh
+```
+
+`.env` is gitignored — your preference is local. `build.sh` sources it automatically. You can also override inline:
+
+```bash
+INSTALL_MORPH_PLUGIN=1 ./build.sh   # one-shot enable
+./build.sh                           # uses .env or defaults to 0 (no morph)
+```
+
+You can also disable an already-installed plugin per-project without rebuilding:
+
+```bash
+omp plugin disable pi-morphllm-plugin
+```
+
+#### OpenRouter configuration
+
+When morph is enabled, the startup script automatically:
+
+1. Links the plugin into `~/.omp/plugins` (persists across sandbox restarts via the host mount).
+2. Creates `~/.pi/agent/morph.json` from the image template, configured to use OpenRouter as the endpoint (`baseUrl: https://openrouter.ai/api/v1`).
+3. Extracts your OpenRouter API key from omp's auth store (`omp token openrouter`) and writes it to `~/.pi/agent/morph.env`.
+
+The routing mode is set to `prefer` (not `force`) with `fallbackToNativeTools: true`, so Morph tool failures fall back to native omp tools gracefully.
+
+**Important limitation:** Morph's tools (FastApply, WarpGrep, compaction) call Morph's proprietary API at `api.morphllm.com`. OpenRouter does not implement Morph's API — these calls will fail (404) and fall back to native omp tools. To enable the full Morph toolset, get a Morph API key from [morphllm.com](https://morphllm.com) and set it in `~/.pi/agent/morph.env`:
+
+```bash
+echo "sk-morph-..." > ~/.pi/agent/morph.env
+```
+
+Then set `"baseUrl": "https://api.morphllm.com"` in `~/.pi/agent/morph.json` (or remove the `baseUrl` field to use the default). Run `/morph_status` inside omp to verify.
+
+#### Config file locations
+
+| File | Path | Purpose |
+|---|---|---|
+| morph.json | `~/.pi/agent/morph.json` | Plugin config (ephemeral — recreated from template at each sandbox start) |
+| morph.env | `~/.pi/agent/morph.env` | API key(s) — one per line (regenerated from omp auth at each start) |
+| Template | `/opt/morph-config/morph.json` | Image-baked default config (the source for the ephemeral copy) |
+
+Changing the morph.json template requires a rebuild. Editing `~/.pi/agent/morph.json` directly takes effect on the next session reload (no rebuild needed).
 
 ### Security
 

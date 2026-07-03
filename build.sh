@@ -81,9 +81,16 @@ fi
 OMP_VERSION="${OMP_VERSION:?could not determine OMP_VERSION}"
 IMAGE="${OMP_SBX_IMAGE:-omp-sbx:latest}"
 
-echo ">> building ${IMAGE} (omp v${OMP_VERSION})"
+# Source .env if present (gitignored — copy from .env.example)
+if [ -f "$DIR/.env" ]; then
+  set -a; source "$DIR/.env"; set +a
+fi
+INSTALL_MORPH_PLUGIN="${INSTALL_MORPH_PLUGIN:-0}"
+
+echo ">> building ${IMAGE} (omp v${OMP_VERSION}, morph=${INSTALL_MORPH_PLUGIN})"
 docker build \
   --build-arg "OMP_VERSION=${OMP_VERSION}" \
+  --build-arg "INSTALL_MORPH_PLUGIN=${INSTALL_MORPH_PLUGIN}" \
   -t "${IMAGE}" \
   -f "${DIR}/sbx-kit/Dockerfile" \
   "${DIR}"

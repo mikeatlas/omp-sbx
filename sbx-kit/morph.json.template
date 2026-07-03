@@ -1,0 +1,26 @@
+{
+  "apiKey": "multiple",
+  "apiKeyFile": "~/.pi/agent/morph.env",
+  "apiKeyStrategy": "round-robin",
+  "baseUrl": "https://openrouter.ai/api/v1",
+  "editEnabled": true,
+  "warpgrepEnabled": true,
+  "warpgrepGithubEnabled": true,
+  "autoCompactEnabled": false,
+  "allowReadonlyAgents": false,
+  "routing": {
+    "editMode": "prefer",
+    "codebaseSearchMode": "prefer",
+    "githubSearchMode": "prefer",
+    "fallbackToNativeTools": true
+  },
+  "statsDashboard": {
+    "enabled": false
+  },
+  "compactContextThreshold": 0.85,
+  "compactPreserveRecent": 1,
+  "compactRatio": 0.3,
+  "timeoutMs": 30000,
+  "warpGrepTimeoutMs": 60000,
+  "compactTimeoutMs": 60000
+}
