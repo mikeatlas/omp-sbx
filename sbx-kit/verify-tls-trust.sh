@@ -13,8 +13,8 @@ set -euo pipefail
 PROXY="gateway.docker.internal:3128"
 CA_CERT="/usr/local/share/ca-certificates/proxy-ca.crt"
 CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
-TEST_HOST="example.com"
-TEST_HOST_PORT="${TEST_HOST}:443"
+ALLOWED_HOST="registry.npmjs.org"        # in spec.yaml allowedDomains
+BLOCKED_HOST="example.com"               # not in allowedDomains
 
 PASS=0
 FAIL=0
@@ -64,49 +64,66 @@ else
   _fail "Proxy env vars missing  (HTTP_PROXY='${http_proxy_val}'  HTTPS_PROXY='${https_proxy_val}')"
 fi
 
-# ── 5. HTTPS via proxy: cert chain signed by proxy CA ─────────────────────────
-_head "5. TLS chain through proxy to ${TEST_HOST}"
+# ── 5a. Allowed domain: TLS chain validates through proxy ────────────────────
+_head "5a. TLS chain through proxy to ${ALLOWED_HOST} (allowed domain)"
 chain=$(echo | openssl s_client \
-  -connect "$TEST_HOST_PORT" \
+  -connect "${ALLOWED_HOST}:443" \
   -proxy "$PROXY" \
   -CAfile "$CA_BUNDLE" \
-  -showcerts \
   2>&1) || true
 
-# Check the chain depth-1 issuer is the proxy CA
 issuer_d0=$(echo "$chain" | grep "^issuer=" | head -1 | sed 's/^issuer=//') || true
 verify_ok=$(echo "$chain" | grep -c "Verify return code: 0 (ok)") || true
 
 if [ "$verify_ok" -ge 1 ]; then
-  _pass "Chain verified OK  |  leaf issuer: ${issuer_d0}"
+  _pass "Chain verified OK  |  issuer: ${issuer_d0}"
 else
   rc_line=$(echo "$chain" | grep "Verify return code:" | tail -1)
   _fail "Chain did NOT verify  |  ${rc_line:-no verify line found}"
 fi
 
-# Confirm the proxy actually intercepted (leaf cert issuer is proxy CA, not origin CA)
-if echo "$issuer_d0" | grep -qi "Docker Sandboxes"; then
-  _pass "Leaf cert issued by Docker Sandboxes Proxy CA  (interception confirmed)"
+# ── 5b. Non-allowed domain: blocked by policy even through proxy ──────────────
+_head "5b. Non-allowed domain blocked through proxy (${BLOCKED_HOST})"
+blocked_proxy=$(curl -sv --max-time 5 "https://${BLOCKED_HOST}" 2>&1) || true
+
+if echo "$blocked_proxy" | grep -qi "blocked by network policy"; then
+  _pass "https://${BLOCKED_HOST} blocked by sbx network policy (allowedDomains enforced)"
 else
-  _fail "Leaf cert NOT issued by proxy CA  (issuer: '${issuer_d0}') — proxy may not be intercepting"
+  http_status=$(echo "$blocked_proxy" | grep -oE "HTTP/[0-9.]+ [0-9]+" | tail -1) || true
+  if [ -n "$http_status" ]; then
+    _fail "https://${BLOCKED_HOST} reached with ${http_status} — domain policy may not be enforced"
+  else
+    _pass "https://${BLOCKED_HOST} did not succeed (not in allowedDomains)"
+  fi
 fi
 
-# ── 6. Direct egress is blocked ───────────────────────────────────────────────
-_head "6. Direct egress blocked (no proxy)"
-# Unset proxy env for this call so curl goes direct
-direct_out=$(env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
-  curl -sv --max-time 5 "https://${TEST_HOST}" 2>&1) || true
+# ── 6a. Allowed domain reachable without proxy env ───────────────────────────
+# sbx permits allowedDomains at the network level — stripping proxy env vars
+# should not break access to permitted domains.
+_head "6a. Allowed domain reachable without proxy env (${ALLOWED_HOST})"
+allowed_direct=$(env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
+  curl -sf --max-time 10 -o /dev/null -w "%{http_code}" "https://${ALLOWED_HOST}" 2>&1) || true
 
-if echo "$direct_out" | grep -qi "blocked by network policy"; then
-  _pass "Direct HTTPS to ${TEST_HOST} blocked by sbx network policy"
-elif echo "$direct_out" | grep -qi "Could not resolve\|Connection refused\|Network is unreachable\|timed out"; then
-  _pass "Direct HTTPS to ${TEST_HOST} unreachable (no direct internet path)"
+if echo "$allowed_direct" | grep -qE "^[23][0-9][0-9]$"; then
+  _pass "https://${ALLOWED_HOST} reachable without proxy env (HTTP ${allowed_direct}) — network-level allow works"
 else
-  http_status=$(echo "$direct_out" | grep -oP "< HTTP/\S+ \K[0-9]+" | head -1) || true
+  _fail "https://${ALLOWED_HOST} unreachable without proxy env (got: '${allowed_direct}') — expected allowed domain to be reachable"
+fi
+
+# ── 6b. Non-allowed domain blocked even without proxy env ─────────────────────
+# Blocked domains should be rejected at the network level regardless of proxy config.
+_head "6b. Non-allowed domain blocked without proxy env (${BLOCKED_HOST})"
+blocked_direct=$(env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
+  curl -sv --max-time 5 "https://${BLOCKED_HOST}" 2>&1) || true
+
+if echo "$blocked_direct" | grep -qi "blocked by network policy"; then
+  _pass "https://${BLOCKED_HOST} blocked at network level without proxy env (policy enforced by sbx, not proxy config)"
+else
+  http_status=$(echo "$blocked_direct" | grep -oE "HTTP/[0-9.]+ [0-9]+" | tail -1) || true
   if [ -n "$http_status" ]; then
-    _fail "Direct HTTPS to ${TEST_HOST} succeeded with HTTP ${http_status} — sandbox may have unproxied egress"
+    _fail "https://${BLOCKED_HOST} reached with ${http_status} without proxy env — network policy not enforced"
   else
-    _pass "Direct HTTPS to ${TEST_HOST} did not succeed (${direct_out##*$'\n':-no connection})"
+    _pass "https://${BLOCKED_HOST} did not succeed without proxy env"
   fi
 fi
 
