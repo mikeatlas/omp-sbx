@@ -1,0 +1,45 @@
+# sbx TLS-intercepting proxy CA — placeholder certificate.
+#
+# This file is installed into the browser container's OS trust store at build
+# time (update-ca-certificates). Replace this with your real sbx proxy CA
+# certificate before building the production image.
+#
+# To extract the CA from a running mitmproxy or similar proxy:
+#   mitmdump --showversion   # or check your proxy's docs
+#   # export cert from http://mitm.it when a browser is proxied through it
+#
+# To generate a fresh self-signed CA for local dev:
+#   ./sbx-kit/gen-proxy-ca.sh
+#   # Keep sbx-ca.key secret — do NOT commit it.
+#
+-----BEGIN CERTIFICATE-----
+MIIFXzCCA0egAwIBAgIUXGyrH7abRu7Mmm/fyoQWU/HdX7IwDQYJKoZIhvcNAQEL
+BQAwPzEVMBMGA1UEAwwMc2J4LXByb3h5LWNhMRAwDgYDVQQKDAdvbXAtc2J4MRQw
+EgYDVQQLDAtwbGFjZWhvbGRlcjAeFw0yNjA3MDYwMzQ2MDlaFw0zNjA3MDMwMzQ2
+MDlaMD8xFTATBgNVBAMMDHNieC1wcm94eS1jYTEQMA4GA1UECgwHb21wLXNieDEU
+MBIGA1UECwwLcGxhY2Vob2xkZXIwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIK
+AoICAQDBh8H1ZgiCSEP8O5xZEkEBb5PI3rCNIItnIM08+MRs7mS7AjbKZVp60fSA
+79NGYwBqvIKWb9p/9XcygwqUjY1FVbdAGRji6yUtNZ8Y1LO8KUJJ77JaulD526A0
+jWZZhsuaWWau4NcqQMundyP423YRbAW8yUV+PxXIlHwg+jSyTL6TjVCe5hW4Zs2e
+efrbUVHsKgJ+lbX8CCMbmf0+0g8XJO1pZrcU4I+w8eXiJnI0dUE+AYyEkqsoEA8x
+bSei/uS5gyMDV9pApdRnZo/nmgvsdJdXPLAoPqwFz6iPP+wIByGV7JndrmHjL36a
+7jVmWExynYNsQNEXNzU/vLb/7AaIa9Tde2RtyEl4Sx3Zb94EL+Wnh9iV7D3nXvId
+IPPQnNM6AQvjvrIcqcaqCWNVM9IeZ4pcETCz8uDoZlwR0cIdIgn1UT1bb3YP2uUH
+7zvKmF5NUpkyXFBPODZ6rUga+oW8ffDGaxr4WbwHRYB0HBMebptZFj/CVNuz5MFH
+h+BrupeGjGDIiHaof96EYf+z5PvlpGdXMGg2AxJ8wYP7JtYf+aVCiMqG7QLkro53
+4+PpYoon35sv9Nzy/kKET5YNwFr1hR9G50jlHgEMUD27gOmHDZsoknwSjXNu7ZIz
+xkMYzJIal8v1W4T4tP7BqWR0AgUT4wSo/Ps+sri8ZE67U0VRQwIDAQABo1MwUTAd
+BgNVHQ4EFgQUY7+kaD6149ipH4bEiap50Y1FTiEwHwYDVR0jBBgwFoAUY7+kaD61
+49ipH4bEiap50Y1FTiEwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOC
+AgEAUKM73Wq1oibSMJCtLULZbn2W2ILCAkfPLWLHzJIFcfo1z0Hl5m25mqj/XiBi
+VdwSCUc45+YDf37if7dXdBm2EnXKuamIPQMR+nJQwneH910SAQ95mzXw7FN60hb+
+JT465LQYEtHWhUe+Z0IBRMtzM0gpGPO0h8HhUn6JBxjE4r5h4X7elAS6nNRfI76y
+PED6O2Et14Nnx4tr68BlJx7X9HcJDpsR60se/iC6Hi4VmudUH9N7doDpm6/M/HVU
+p6/hxz/61E9Jo+TdPoY0wE/G+o5GVMbS1HQ244+c2JqjciAuqfZk0u1qZzYl4tRx
+zE9hHMhixqXw9eMXHDqS/NZjW0pZyX8c/sI2XJo6Nqb4Cue5WfB+jjp5c7HfxJLv
+jLU06l7lg5jExvoh0AoGDyBNCiocjUSax8pGjrh7GBQDBHW6eUXASApXTO7CelOf
+2u0Cr886k2JzIM4+OQC3s6Kr+hc2ef/tsHcm++WH66vdRA+TPRcsQgFcOUfukt1a
+AyZX7J5HWdMV8L2R3ebiJIBePvDxYyV2Ak79i4oQZd2diDrVgcJdKt8RkJwDyibG
+AcTMWaWoHWuHU96fvZtj5cCAWtLt5RAtu2HmQKOBSq9sH8sbXl+qGo9vKKNCam1w
+IemRQjPZP98UdOYylChJo8KG+f/WRQ6W0+fyQUm6EPm6A7Y=
+-----END CERTIFICATE-----
