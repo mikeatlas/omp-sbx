@@ -149,12 +149,14 @@ cp .env.example .env      # then edit: INSTALL_MORPH_PLUGIN=1
 
 `.env` is gitignored. Both `build.sh` and `omp-sbx` source it, so a key set there reaches the sandbox automatically. Disable per-project without rebuilding: `omp plugin disable pi-morphllm-plugin`.
 
+The plugin targets upstream `pi`; the build auto-applies three omp-specific compatibility patches so it works cleanly here: a `withFileMutationQueue` shim, a pre-bundled Morph SDK, and a GitHub-search patch that prefers Morph's repo-search backend and falls back to a shallow public `git clone` when that backend is unavailable.
+
 #### API key (first match wins)
 
 1. **`MORPH_API_KEY`** in `.env` → native Morph endpoint (`api.morphllm.com`). **All four tools work.** Get a key at [morphllm.com](https://morphllm.com).
 2. **OpenRouter key** (from omp's auth store via `omp token openrouter`) → OpenRouter endpoint. Only `morph_fastapply` works; the others need Morph's proprietary API and fall back to native omp tools.
 
-Routing is `prefer` with `fallbackToNativeTools: true`, so Morph failures degrade gracefully to native omp tools. The config persists in `~/.omp/morph/` (host-mounted) and is symlinked into `~/.pi/agent/` at each start, so it survives sandbox restarts.
+`omp-sbx` writes the key directly to `~/.omp/morph/morph.env` on the host before creating the sandbox — sbx does not expand `${VAR}` placeholders in `spec.yaml` environment variables, so the startup script reads the key from the host-mounted file instead. The config persists in `~/.omp/morph/` (host-mounted) and is symlinked into `~/.pi/agent/` at each start, surviving sandbox restarts.
 
 | Tool | Morph key | OpenRouter key |
 |---|---|---|
@@ -163,9 +165,9 @@ Routing is `prefer` with `fallbackToNativeTools: true`, so Morph failures degrad
 | `warpgrep_github_search` | ✅ | ❌ |
 | Morph compaction | ✅ | ❌ |
 
-> **Note:** `warpgrep_github_search` calls `morphllm.com` (Vercel-hosted), which may return a 429 security checkpoint from some network egress IPs — including the sbx proxy. The other three tools use `api.morphllm.com` and are unaffected. The tool is correctly configured and works when the endpoint is reachable.
+`warpgrep_github_search` first tries Morph's remote repo backend at `repos.morphllm.com`. If that import path is unavailable, the patched plugin shallow-clones the public repo from GitHub and runs WarpGrep locally, so the tool still succeeds inside sbx.
 
-**Verify:** run `/morph_status` (provider + tool state) or `/morph_selftest` (live calls to all four) inside omp. If the morph config is missing after a resume, recreate the sandbox with `omp-sbx --new`.
+**Verify:** run `/morph_status` or invoke `warpgrep_github_search` against a public repo. If the morph config is missing after a resume, recreate the sandbox with `omp-sbx --new`.
 
 ### Security
 

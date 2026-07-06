@@ -93,16 +93,26 @@ RUN ARCH="$(uname -m)" && \
 # ── pi-morphllm-plugin (optional, opt-in via build arg) ─────────────────────
 # Morph runtime extension: adds morph_fastapply, warpgrep_codebase_search,
 # warpgrep_github_search tools + Morph compaction. Opt out by building with
-# INSTALL_MORPH_PLUGIN=0 (the default). When enabled, the npm package is
-# installed globally and the startup script links it + writes morph.json.
-# See README "Morph plugin" section for configuration details.
+# INSTALL_MORPH_PLUGIN=0 (the default). When enabled, morph-install.sh
+# installs the npm package, applies three compatibility patches, and bundles
+# the Morph SDK so it loads correctly under omp's internal module loader.
+# See README "Morph plugin" section and sbx-kit/morphllm/README.md for details.
 ARG INSTALL_MORPH_PLUGIN=0
+
+USER root
+COPY sbx-kit/morphllm/morph.json.template /opt/morph-config/morph.json
+COPY sbx-kit/morphllm/morph-withfilemutationqueue.shim.js /opt/morph-config/withFileMutationQueue.shim.js
+COPY sbx-kit/morphllm/morph-install.sh /opt/morph-config/morph-install.sh
+COPY sbx-kit/morphllm/morph-patch.py /opt/morph-config/morph-patch.py
+COPY sbx-kit/omp-init.sh /usr/local/bin/omp-init.sh
+RUN chmod +x /opt/morph-config/morph-install.sh /usr/local/bin/omp-init.sh
+
+USER agent
 RUN if [ "${INSTALL_MORPH_PLUGIN}" = "1" ]; then \
-      npm install -g pi-morphllm-plugin; \
+      /opt/morph-config/morph-install.sh; \
     else \
       echo ">> morph plugin install skipped (INSTALL_MORPH_PLUGIN=${INSTALL_MORPH_PLUGIN})"; \
     fi
-COPY sbx-kit/morph.json.template /opt/morph-config/morph.json
 
 # ── Environment ──────────────────────────────────────────────────────────────
 ENV PI_CONFIG_DIR=.omp \

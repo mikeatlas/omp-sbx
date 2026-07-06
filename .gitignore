@@ -1,4 +1,4 @@
 .vscode/
 .history/
 *.code-workspace
-.env
+.envsbx-kit/morphllm/__pycache__/

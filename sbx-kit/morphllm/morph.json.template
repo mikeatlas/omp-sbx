@@ -1,18 +1,28 @@
 {
   "apiKey": "multiple",
-  "apiKeyFile": "~/.pi/agent/morph.env",
+  "apiKeyFile": "~/.pi/morph/morph.env",
   "apiKeyStrategy": "round-robin",
   "baseUrl": "https://api.morphllm.com",
   "editEnabled": true,
   "warpgrepEnabled": true,
   "warpgrepGithubEnabled": true,
-  "autoCompactEnabled": false,
+  "contextResearchEnabled": true,
+  "browserUrlEnabled": false,
+  "previewPrEnabled": false,
+  "autoCompactEnabled": true,
   "allowReadonlyAgents": false,
   "routing": {
     "editMode": "prefer",
     "codebaseSearchMode": "prefer",
     "githubSearchMode": "prefer",
     "fallbackToNativeTools": true
+  },
+  "fastModel": {
+    "enabled": true,
+    "model": "morph-qwen36-27b",
+    "timeoutMs": 30000,
+    "contextResearchDistillationEnabled": true,
+    "repairSuggestionsEnabled": true
   },
   "statsDashboard": {
     "enabled": false

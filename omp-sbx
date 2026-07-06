@@ -55,9 +55,24 @@ if [ ${#OMP_ARGS[@]} -gt 0 ]; then set -- "${OMP_ARGS[@]}"; else set --; fi
 source "$REPO_DIR/sbx-preflight.sh"
 ensure_sbx "omp-sbx"
 # Source .env if present (gitignored — copy from .env.example).
-# Exports MORPH_API_KEY etc. so sbx can substitute ${MORPH_API_KEY} in spec.yaml.
+# Exports MORPH_API_KEY etc. for use below.
 if [ -f "$REPO_DIR/.env" ]; then
   set -a; source "$REPO_DIR/.env"; set +a
+fi
+# Pre-seed ~/.omp/morph/morph.env with the Morph API key on the host so the
+# sandbox startup script can use it. sbx does not expand ${VAR} in spec.yaml
+# environment.variables, so passing MORPH_API_KEY that way is unreliable.
+# Writing it here (to the host-mounted path) means the startup script always
+# finds the key in morph.env regardless of sbx substitution behaviour.
+if [ -n "${MORPH_API_KEY:-}" ]; then
+  case "$MORPH_API_KEY" in
+    '${'*) : ;;  # unresolved template placeholder — skip
+    *)
+      mkdir -p "$HOME/.omp/morph"
+      printf '%s\n' "$MORPH_API_KEY" > "$HOME/.omp/morph/morph.env"
+      chmod 600 "$HOME/.omp/morph/morph.env"
+      ;;
+  esac
 fi
 
 if [ ! -d "$HOME/.omp" ]; then
