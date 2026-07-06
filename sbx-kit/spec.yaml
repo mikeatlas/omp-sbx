@@ -136,8 +136,10 @@ environment:
     GH_CONFIG_DIR: "/home/agent/.config/gh"
     # agent-browser: Playwright Chromium binary (stable symlink in the image)
     AGENT_BROWSER_EXECUTABLE_PATH: "/usr/local/bin/chromium"
-    # sbx TLS proxy intercepts HTTPS — ignore cert errors for headless browsing
-    AGENT_BROWSER_IGNORE_HTTPS_ERRORS: "true"
+    # sbx injects the proxy CA into the OS trust store at runtime and sets
+    # HTTP_PROXY/HTTPS_PROXY — agent-browser picks both up automatically.
+    # Do not disable certificate validation; the CA is already trusted.
+    AGENT_BROWSER_IGNORE_HTTPS_ERRORS: "false"
     # Native Morph API key (optional — enables the full Morph toolset).
     # omp-sbx sources .env (MORPH_API_KEY=sk-...) before creating the sandbox,
     # so sbx substitutes it here. Without it, falls back to OpenRouter
@@ -165,8 +167,9 @@ agentContext: |
   installed `agent-browser` CLI instead (`agent-browser open <url>`, then
   `snapshot`, `click @eN`, `screenshot`, etc.). It uses a real Chromium
   installed via Playwright (`AGENT_BROWSER_EXECUTABLE_PATH=/usr/local/bin/chromium`).
-  The sbx TLS proxy intercepts HTTPS, so `AGENT_BROWSER_IGNORE_HTTPS_ERRORS` is
-  set — cert errors are ignored automatically. For fetching static web content
+  The sbx TLS proxy intercepts HTTPS. The proxy CA is injected into the
+  container trust store at runtime by sbx, so `agent-browser` validates
+  certificates normally — no cert-error bypass needed. For fetching static web content
   (articles, docs, JSON, PDFs) prefer the `read` tool on a URL — no browser needed.
 
   The pi-morphllm-plugin is installed (if built with `INSTALL_MORPH_PLUGIN=1`).
