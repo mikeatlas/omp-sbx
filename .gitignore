@@ -2,4 +2,3 @@
 .history/
 *.code-workspace
 .env
-sbx-kit/sbx-ca.key

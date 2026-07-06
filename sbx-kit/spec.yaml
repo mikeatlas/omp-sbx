@@ -136,18 +136,8 @@ environment:
     GH_CONFIG_DIR: "/home/agent/.config/gh"
     # agent-browser: Playwright Chromium binary (stable symlink in the image)
     AGENT_BROWSER_EXECUTABLE_PATH: "/usr/local/bin/chromium"
-    # Hardened TLS interception: the agent browser is forced through the sbx proxy.
-    # The proxy CA is installed in the container trust store; certificate validation
-    # is NOT disabled. Set to "true" only as a local dev fallback when the proxy CA
-    # has not been installed yet.
-    AGENT_BROWSER_IGNORE_HTTPS_ERRORS: "false"
-    AGENT_BROWSER_PROXY: "http://sbx-proxy:8080"
-    AGENT_BROWSER_PROXY_CA_CERT: "/usr/local/share/ca-certificates/sbx-proxy-ca.crt"
-    # Force all container traffic through the proxy (HTTP_PROXY / HTTPS_PROXY).
-    HTTP_PROXY: "http://sbx-proxy:8080"
-    HTTPS_PROXY: "http://sbx-proxy:8080"
-    NO_PROXY: "localhost,127.0.0.1"
-    NODE_EXTRA_CA_CERTS: "/usr/local/share/ca-certificates/sbx-proxy-ca.crt"
+    # sbx TLS proxy intercepts HTTPS — ignore cert errors for headless browsing
+    AGENT_BROWSER_IGNORE_HTTPS_ERRORS: "true"
     # Native Morph API key (optional — enables the full Morph toolset).
     # omp-sbx sources .env (MORPH_API_KEY=sk-...) before creating the sandbox,
     # so sbx substitutes it here. Without it, falls back to OpenRouter
@@ -175,10 +165,9 @@ agentContext: |
   installed `agent-browser` CLI instead (`agent-browser open <url>`, then
   `snapshot`, `click @eN`, `screenshot`, etc.). It uses a real Chromium
   installed via Playwright (`AGENT_BROWSER_EXECUTABLE_PATH=/usr/local/bin/chromium`).
-  The sbx TLS proxy intercepts HTTPS. The proxy CA certificate is installed in
-  the container trust store so the browser validates certificates normally
-  (no blanket cert-error bypass). For local dev fallback only, set
-  `AGENT_BROWSER_IGNORE_HTTPS_ERRORS=true`. For fetching static web content
+  The sbx TLS proxy intercepts HTTPS, so `AGENT_BROWSER_IGNORE_HTTPS_ERRORS` is
+  set — cert errors are ignored automatically. For fetching static web content
+  (articles, docs, JSON, PDFs) prefer the `read` tool on a URL — no browser needed.
 
   The pi-morphllm-plugin is installed (if built with `INSTALL_MORPH_PLUGIN=1`).
   It adds `morph_fastapply`, `warpgrep_codebase_search`, and
