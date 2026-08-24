@@ -198,5 +198,7 @@ else
       sleep 2
     fi
   fi
-  exec sbx exec "$SANDBOX_NAME" omp "$@"
+  # Use the same init path as interactive sessions so workspace and plugin
+  # initialization cannot be bypassed by one-shot commands or verification.
+  exec sbx exec -w /home/agent "$SANDBOX_NAME" omp-init.sh "$@"
 fi
