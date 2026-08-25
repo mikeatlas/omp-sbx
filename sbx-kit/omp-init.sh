@@ -24,4 +24,8 @@ if [ -d "$MORPH_CFG_DIR" ]; then
     ln -sf "$MORPH_CFG_DIR/morph.env" "$HOME/.pi/morph/morph.env" || true
 fi
 
+# The sbx startup hook replaces this path with a symlink to the host workspace.
+# Enter it only after the hook has completed, rather than declaring it as the
+# image WORKDIR where sbx's own setup execs would depend on it.
+cd /home/agent/workspace
 exec omp "$@"

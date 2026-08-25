@@ -118,7 +118,10 @@ RUN if [ "${INSTALL_MORPH_PLUGIN}" = "1" ]; then \
 ENV PI_CONFIG_DIR=.omp \
     HOME=/home/agent
 
-WORKDIR /home/agent/workspace
+# Keep the image working directory stable while sbx runs its startup hooks.
+# spec.yaml replaces /home/agent/workspace with a symlink to the host mount;
+# using that mutable path as WORKDIR makes later OCI execs fail under sbx 0.39.
+WORKDIR /home/agent
 
 # Override the base image's flavor label so sbx recognizes this template as
 # built for the "omp" agent (suppresses the "built for shell agent" warning).

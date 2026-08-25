@@ -33,13 +33,16 @@ commands:
           if [ -f "$HOME/.config/gh/hosts.yml" ]; then
             gh auth setup-git 2>/dev/null || true
           fi
-          # Symlink primary workspace mount to /home/agent/workspace
-          # sbx mounts workspaces at their host path; we need them at the
-          # template's WORKDIR (/home/agent/workspace) for omp to find them.
-          WS_HOST=$(mount | grep 'type virtiofs' | grep -v '\.omp' | grep -v resolv | sed 's/.* on //; s/ type.*//' | head -1)
-          if [ -n "$WS_HOST" ] && [ "$WS_HOST" != "/home/agent/workspace" ]; then
+          # Symlink the primary workspace to the stable path omp uses. sbx
+          # exposes the exact host mount as WORKSPACE_DIR; scanning `mount`
+          # is unsafe because /etc/hosts is also a virtiofs mount.
+          WS_HOST="${WORKSPACE_DIR:-}"
+          if [ -d "$WS_HOST" ] && [ "$WS_HOST" != "/home/agent/workspace" ]; then
             rm -rf /home/agent/workspace
             ln -sf "$WS_HOST" /home/agent/workspace
+          else
+            echo "omp-sbx: workspace mount unavailable: ${WS_HOST:-unset}" >&2
+            exit 1
           fi
           # ── Morph plugin setup (if installed in the image) ─────────────
           # Links pi-morphllm-plugin into ~/.omp/plugins (persists via host
