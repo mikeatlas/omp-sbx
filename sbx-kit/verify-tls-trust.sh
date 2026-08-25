@@ -13,8 +13,8 @@ set -euo pipefail
 PROXY="gateway.docker.internal:3128"
 CA_CERT="/usr/local/share/ca-certificates/proxy-ca.crt"
 CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
-ALLOWED_HOST="registry.npmjs.org"        # in spec.yaml allowedDomains
-BLOCKED_HOST="example.com"               # not in allowedDomains
+ALLOWED_HOST="registry.npmjs.org"        # in spec.yaml permissions.network.allow
+BLOCKED_HOST="example.com"               # not in permissions.network.allow
 
 PASS=0
 FAIL=0
@@ -87,19 +87,19 @@ _head "5b. Non-allowed domain blocked through proxy (${BLOCKED_HOST})"
 blocked_proxy=$(curl -sv --max-time 5 "https://${BLOCKED_HOST}" 2>&1) || true
 
 if echo "$blocked_proxy" | grep -qi "blocked by network policy"; then
-  _pass "https://${BLOCKED_HOST} blocked by sbx network policy (allowedDomains enforced)"
+  _pass "https://${BLOCKED_HOST} blocked by sbx network policy (permissions.network.allow enforced)"
 else
   http_status=$(echo "$blocked_proxy" | grep -oE "HTTP/[0-9.]+ [0-9]+" | tail -1) || true
   if [ -n "$http_status" ]; then
     _fail "https://${BLOCKED_HOST} reached with ${http_status} — domain policy may not be enforced"
   else
-    _pass "https://${BLOCKED_HOST} did not succeed (not in allowedDomains)"
+    _pass "https://${BLOCKED_HOST} did not succeed (not in permissions.network.allow)"
   fi
 fi
 
 # ── 6a. Allowed domain reachable without proxy env ───────────────────────────
-# sbx permits allowedDomains at the network level — stripping proxy env vars
-# should not break access to permitted domains.
+# sbx permits permissions.network.allow at the network level — stripping proxy
+# env vars should not break access to permitted domains.
 _head "6a. Allowed domain reachable without proxy env (${ALLOWED_HOST})"
 allowed_direct=$(env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
   curl -sf --max-time 10 -o /dev/null -w "%{http_code}" "https://${ALLOWED_HOST}" 2>&1) || true
