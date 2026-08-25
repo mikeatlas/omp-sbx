@@ -90,7 +90,7 @@ fi
 
 # ── Sandbox name (per-directory) ─────────────────────────────────────────────
 WORKDIR="$(pwd)"
-SANDBOX_NAME="omp-$(basename "$WORKDIR" | tr -cd '[:alnum:]_-')"
+SANDBOX_NAME="omp-$(basename "$WORKDIR" | tr '_' '-' | tr -cd '[:alnum:]_-')"
 
 # ── Check if sandbox already exists ──────────────────────────────────────────
 sandbox_exists() {

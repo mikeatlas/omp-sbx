@@ -281,7 +281,7 @@ remove_worktree_from_workspace() {
 add_worktree_to_workspace "$BRANCH" "$WORKTREE_PATH"
 
 # ── Sandbox name (unique per worktree) ───────────────────────────────────────
-SANDBOX_NAME="omp-$(echo "${REPO_BASE}-${BRANCH}" | tr -cd '[:alnum:]_-')"
+SANDBOX_NAME="omp-$(echo "${REPO_BASE}-${BRANCH}" | tr '_' '-' | tr -cd '[:alnum:]_-')"
 
 # ── Banner ───────────────────────────────────────────────────────────────────
 log ""
