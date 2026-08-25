@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
 # Build and load the omp-sbx template image into the sbx runtime.
-# OMP_VERSION resolution: $OMP_VERSION env → latest GitHub release tag.
 #
-# Release cooldown: when fetching the latest release automatically, the script
-# warns if the release is newer than RELEASE_COOLDOWN_DAYS (default: 3) and
-# asks for confirmation. This protects against 0-day/compromised upstreams.
-# Override with: RELEASE_COOLDOWN_DAYS=0 ./build.sh  (skip the check)
-# Or pin explicitly: OMP_VERSION=16.1.17 ./build.sh  (no check needed)
+# OMP_VERSION resolution:
+#   - unset            → OMP_VERSION_PINNED below (reproducible default)
+#   - OMP_VERSION=latest → fetch the latest GitHub release tag (with the
+#     cooldown check described below)
+#   - OMP_VERSION=X.Y.Z → pin explicitly, no network call for version
+#     resolution
+#
+# Release cooldown: when fetching "latest", the script warns if the release
+# is newer than RELEASE_COOLDOWN_DAYS (default: 3) and asks for confirmation.
+# This protects against 0-day/compromised upstreams.
+# Override with: RELEASE_COOLDOWN_DAYS=0 OMP_VERSION=latest ./build.sh
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RELEASE_COOLDOWN_DAYS="${RELEASE_COOLDOWN_DAYS:-3}"
+# Last synced 2026-08-25. Bump when you want a newer baseline; omp still
+# self-updates at runtime, so this only sets the image's starting version.
+OMP_VERSION_PINNED="18.0.4"
 
 # Colors (only when stderr is a tty)
 if [ -t 2 ]; then
@@ -25,6 +33,9 @@ source "$DIR/sbx-preflight.sh"
 ensure_sbx "build.sh"
 
 if [ -z "${OMP_VERSION:-}" ]; then
+  OMP_VERSION="$OMP_VERSION_PINNED"
+  echo ">> using pinned omp v${OMP_VERSION} (set OMP_VERSION=latest to fetch the newest release)" >&2
+elif [ "$OMP_VERSION" = "latest" ]; then
   echo ">> fetching latest omp release tag" >&2
 
   # Fetch release info: tag name and published date in one call.
