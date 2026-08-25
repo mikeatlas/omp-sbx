@@ -54,6 +54,7 @@ omp "fix the bug"      # one-shot prompt
 |---|---|---|
 | Template | `sbx-kit/Dockerfile` | Extends `docker/sandbox-templates:shell-nightly` with omp binary + dev tools |
 | Kit | `sbx-kit/spec.yaml` | Defines omp entrypoint, network allow-list, env, agent context |
+| Env (experimental) | `sbx-kit/.sbxenv.yaml` + `omp-sbxenv` | Declarative alternative launcher for scripted/CI use — see [Scripted / CI use](#scripted--ci-use-experimental) |
 | Launcher | `omp-sbx` | Wrapper handling banner, sandbox lifecycle, resume vs new |
 | Parallel | `omp-sbx-parallel` | Git worktree-based parallel sandbox launcher |
 | Browser CLI | `sbx-kit/Dockerfile` | Installs `agent-browser` (replaces Puppeteer, which can't spawn in sbx) |
@@ -225,6 +226,36 @@ Worktrees are created as siblings of the repo root: `~/src/myproject@fix-auth-bu
 Requires `jq` on the host (silently skips if unavailable). For full agent instructions, see [`INSTRUCTIONS.md`](INSTRUCTIONS.md).
 
 **VS Code settings:** enable `git.detectWorktrees` to auto-list all worktrees in Source Control, even ones created outside VS Code.
+
+## Scripted / CI use (experimental)
+
+`omp-sbxenv` is an alternative launcher built on Docker sbx's declarative
+`.sbxenv.yaml` + `sbx env` commands (sbx v0.39+; Docker marks `sbx env`
+experimental and subject to change). It fits headless automation better than
+`omp-sbx`'s interactive create/pause/attach flow:
+
+```bash
+omp-sbxenv --version   # create (if needed) + run a one-shot command
+omp-sbxenv --new        # remove + recreate the environment
+```
+
+Under the hood this templates `sbx-kit/.sbxenv.yaml` with `${VAR}` values the
+script exports (workspace path, kit path, sandbox name) and calls
+`sbx env create` / `sbx env exec` / `sbx env rm` directly — no host-mounted
+secret files, since `.sbxenv.yaml` (unlike `spec.yaml`) expands `${VAR}`
+placeholders for real.
+
+**Known gaps vs `omp-sbx`:**
+- No force-quit recovery cascade (re-attach → restart → recreate) — just
+  create-or-reuse.
+- No `~/.config/gh` forwarding. A static env file can't conditionally mount a
+  path that may not exist on every host, and `sbx env create` prompts
+  interactively — hanging in non-interactive/CI contexts — if
+  `additionalWorkspaces` points at a missing directory.
+- Re-running `sbx env run` on an existing environment only re-applies
+  env/MCP changes; other `.sbxenv.yaml` edits need `--new`.
+
+For day-to-day interactive use, stick with `omp-sbx`.
 
 ## Rebuild after omp upgrade
 
