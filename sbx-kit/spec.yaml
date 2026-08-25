@@ -88,10 +88,10 @@ environment:
     # Do not disable certificate validation; the CA is already trusted.
     AGENT_BROWSER_IGNORE_HTTPS_ERRORS: "false"
     # Native Morph API key (optional — enables the full Morph toolset).
-    # omp-sbx sources .env (MORPH_API_KEY=sk-...) before creating the sandbox,
-    # so sbx substitutes it here. Without it, falls back to OpenRouter
-    # (morph_fastapply only). You can also pass --env to sbx directly.
-    MORPH_API_KEY: "${MORPH_API_KEY}"
+    # omp-sbx passes this via `sbx create/run -e MORPH_API_KEY`, which reads
+    # the value from the launcher's shell environment. Not declared here:
+    # sbx does not expand ${VAR} placeholders in this map, so a static entry
+    # would only ever be the literal string, not the resolved value.
 
 setup:
   startup:
@@ -153,22 +153,17 @@ setup:
             mkdir -p "$MORPH_CFG_DIR" "$HOME/.pi/morph"
             [ -f "$MORPH_CFG_DIR/morph.json" ] || cp /opt/morph-config/morph.json "$MORPH_CFG_DIR/morph.json"
             # Inject API key (first match wins):
-            #   1. MORPH_API_KEY env var (guard against unresolved ${MORPH_API_KEY}
-            #      literal when the host env var is absent).
-            #   2. Persisted sk-* key already in morph.env (pre-seeded by omp-sbx).
+            #   1. MORPH_API_KEY env var (passed in via `sbx create/run -e MORPH_API_KEY`).
+            #   2. Persisted sk-* key already in morph.env (written by a prior run below).
             #   3. OpenRouter key from omp auth store → FastApply only.
-            MORPH_KEY=""
-            case "${MORPH_API_KEY:-}" in
-              '${'*|"") : ;;
-              *) MORPH_KEY="$MORPH_API_KEY" ;;
-            esac
+            MORPH_KEY="${MORPH_API_KEY:-}"
             if [ -n "$MORPH_KEY" ]; then
               # Native Morph key from env → all tools (FastApply, WarpGrep, compaction)
               printf '%s\n' "$MORPH_KEY" > "$MORPH_CFG_DIR/morph.env"
               chmod 600 "$MORPH_CFG_DIR/morph.env"
               sed -i 's|"baseUrl": "[^"]*"|"baseUrl": "https://api.morphllm.com"|' "$MORPH_CFG_DIR/morph.json"
             else
-              # Check for a persisted Morph key (pre-seeded by omp-sbx on the host).
+              # Check for a persisted Morph key written by a prior run (see above).
               PERSISTED_KEY="$(head -1 "$MORPH_CFG_DIR/morph.env" 2>/dev/null | tr -d '[:space:]')"
               case "$PERSISTED_KEY" in
                 sk-*)

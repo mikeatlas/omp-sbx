@@ -157,7 +157,7 @@ The plugin targets upstream `pi`; the build auto-applies three omp-specific comp
 1. **`MORPH_API_KEY`** in `.env` → native Morph endpoint (`api.morphllm.com`). **All four tools work.** Get a key at [morphllm.com](https://morphllm.com).
 2. **OpenRouter key** (from omp's auth store via `omp token openrouter`) → OpenRouter endpoint. Only `morph_fastapply` works; the others need Morph's proprietary API and fall back to native omp tools.
 
-`omp-sbx` writes the key directly to `~/.omp/morph/morph.env` on the host before creating the sandbox — sbx does not expand `${VAR}` placeholders in `spec.yaml` environment variables, so the startup script reads the key from the host-mounted file instead. The config persists in `~/.omp/morph/` (host-mounted) and is symlinked into `~/.pi/agent/` at each start, surviving sandbox restarts.
+`omp-sbx` passes the key to the sandbox with `sbx create`/`run -e MORPH_API_KEY` (sbx does not expand `${VAR}` placeholders in `spec.yaml` environment variables, so a native `-e` flag is used instead). The kit's startup script then writes it to `~/.omp/morph/morph.env` (host-mounted, so it persists across sandbox restarts) and symlinks it into `~/.pi/morph/` at each start.
 
 | Tool | Morph key | OpenRouter key |
 |---|---|---|
