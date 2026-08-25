@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+###############################################################################
+# omp-sbxenv — EXPERIMENTAL alternative to omp-sbx using Docker sbx's
+# declarative `.sbxenv.yaml` + `sbx env` commands (sbx v0.39+; Docker itself
+# marks `sbx env` experimental and subject to change).
+#
+# Trade-offs vs omp-sbx:
+#   - No force-quit recovery cascade (re-attach -> restart -> recreate).
+#   - No ~/.config/gh forwarding: a static .sbxenv.yaml can't conditionally
+#     mount a path that may not exist on every host, and sbx prompts
+#     interactively (hangs non-interactively) if additionalWorkspaces points
+#     at a missing directory.
+#   - Re-running `sbx env run` on an existing environment only re-applies
+#     env/MCP changes; other .sbxenv.yaml edits need --new.
+#
+# Reach for this for scripted/CI runs where sbx-native `sbx env create` +
+# `sbx env exec` + `sbx env rm` fits better than a bespoke launcher. For
+# day-to-day interactive use, prefer `omp-sbx`.
+#
+#   $ omp-sbxenv              # create (if needed) + attach, interactive TUI
+#   $ omp-sbxenv --new        # remove + recreate
+#   $ omp-sbxenv --version    # passthrough omp flags (via sbx env exec)
+#   $ omp-sbxenv "fix the bug"# one-shot prompt (via sbx env exec)
+###############################################################################
+set -euo pipefail
+
+SCRIPT_PATH="$0"
+while [ -L "$SCRIPT_PATH" ]; do
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+  SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+  case "$SCRIPT_PATH" in /*) ;; *) SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH" ;; esac
+done
+REPO_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+KIT_DIR="${OMP_SBX_KIT:-$REPO_DIR/sbx-kit}"
+
+if [ -t 2 ]; then
+  C_DIM=$'\033[2m'; C_RED=$'\033[31m'; C_RST=$'\033[0m'
+else
+  C_DIM=''; C_RED=''; C_RST=''
+fi
+log() { printf '%s\n' "$*" >&2; }
+
+# shellcheck source=sbx-preflight.sh
+source "$REPO_DIR/sbx-preflight.sh"
+ensure_sbx "omp-sbxenv"
+# Source .env if present (gitignored — copy from .env.example).
+if [ -f "$REPO_DIR/.env" ]; then
+  set -a; source "$REPO_DIR/.env"; set +a
+fi
+
+if [ ! -d "$HOME/.omp" ]; then
+  log "${C_RED}omp-sbxenv: host config dir not found: $HOME/.omp${C_RST}"
+  exit 1
+fi
+
+# Values referenced by ${VAR} in sbx-kit/.sbxenv.yaml.
+export OMP_SBXENV_KIT_DIR="$KIT_DIR"
+export OMP_SBXENV_WORKSPACE="$(pwd)"
+export OMP_SBXENV_NAME="omp-$(basename "$OMP_SBXENV_WORKSPACE" | tr -cd '[:alnum:]_-')"
+
+# ── Parse flags ──────────────────────────────────────────────────────────────
+FORCE_NEW=false
+OMP_ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --new) FORCE_NEW=true ;;
+    *)     OMP_ARGS+=("$arg") ;;
+  esac
+done
+if [ ${#OMP_ARGS[@]} -gt 0 ]; then set -- "${OMP_ARGS[@]}"; else set --; fi
+
+if $FORCE_NEW; then
+  log "${C_DIM}omp-sbxenv: removing existing environment '$OMP_SBXENV_NAME' (--new)${C_RST}"
+  sbx env rm "$KIT_DIR" --force >/dev/null 2>&1 || true
+fi
+
+# ── Launch ───────────────────────────────────────────────────────────────────
+if [ "$#" -eq 0 ] && [ -t 0 ]; then
+  # Interactive TUI: `sbx env run` creates (if needed) and attaches.
+  exec sbx env run "$KIT_DIR"
+else
+  # Non-interactive: create if needed (idempotent — errors if it already
+  # exists, which sbx env exec below then starts/uses), then exec omp.
+  sbx env create "$KIT_DIR" >/dev/null 2>&1 || true
+  exec sbx env exec "$KIT_DIR" -- omp "$@"
+fi
