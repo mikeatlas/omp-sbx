@@ -59,21 +59,12 @@ ensure_sbx "omp-sbx"
 if [ -f "$REPO_DIR/.env" ]; then
   set -a; source "$REPO_DIR/.env"; set +a
 fi
-# Pre-seed ~/.omp/morph/morph.env with the Morph API key on the host so the
-# sandbox startup script can use it. sbx does not expand ${VAR} in spec.yaml
-# environment.variables, so passing MORPH_API_KEY that way is unreliable.
-# Writing it here (to the host-mounted path) means the startup script always
-# finds the key in morph.env regardless of sbx substitution behaviour.
-if [ -n "${MORPH_API_KEY:-}" ]; then
-  case "$MORPH_API_KEY" in
-    '${'*) : ;;  # unresolved template placeholder — skip
-    *)
-      mkdir -p "$HOME/.omp/morph"
-      printf '%s\n' "$MORPH_API_KEY" > "$HOME/.omp/morph/morph.env"
-      chmod 600 "$HOME/.omp/morph/morph.env"
-      ;;
-  esac
-fi
+# Env vars to inject into the sandbox via `sbx create/run -e`. A bare KEY
+# pulls the value from this shell's environment (already sourced from .env
+# above); sbx does not expand ${VAR} in spec.yaml environment.variables, so
+# this is the reliable way to pass MORPH_API_KEY through.
+SBX_ENV_ARGS=()
+[ -n "${MORPH_API_KEY:-}" ] && SBX_ENV_ARGS+=(-e MORPH_API_KEY)
 
 if [ ! -d "$HOME/.omp" ]; then
   log "${C_RED}omp-sbx: host config dir not found: $HOME/.omp${C_RST}"
@@ -141,7 +132,7 @@ if [ "$#" -eq 0 ] && [ -t 0 ]; then
     # name match missed it and we tried to create over an existing name.
     # Recover by re-attaching (Phase 3) instead of erroring out.
     if create_out="$(sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
-        omp "$WORKDIR" "${MOUNTS[@]}" 2>&1)"; then
+        "${SBX_ENV_ARGS[@]:-}" omp "$WORKDIR" "${MOUNTS[@]}" 2>&1)"; then
       if [ -n "$create_out" ]; then printf '%s\n' "$create_out" >&2; fi
       # Wait for startup commands (symlink creation) to complete.
       sleep 2
@@ -170,19 +161,19 @@ if [ "$#" -eq 0 ] && [ -t 0 ]; then
   # (a force-quit can leave the agent process wedged), stop+restart the sandbox;
   # omp session state lives in the shared ~/.omp mount so the conversation
   # resumes. Last resort: remove + recreate.
-  if ! sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1; then
+  if ! sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" "${SBX_ENV_ARGS[@]:-}" 2>&1; then
     log "${C_DIM}omp-sbx: re-attach failed; restarting sandbox...${C_RST}"
     sbx stop "$SANDBOX_NAME" >/dev/null 2>&1 || true
-    if ! sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1; then
+    if ! sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" "${SBX_ENV_ARGS[@]:-}" 2>&1; then
       log "${C_DIM}omp-sbx: sandbox unresponsive, recreating...${C_RST}"
       sbx rm -f "$SANDBOX_NAME" >/dev/null 2>&1 || true
       if ! sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
-          omp "$WORKDIR" "${MOUNTS[@]}" 2>&1; then
+          "${SBX_ENV_ARGS[@]:-}" omp "$WORKDIR" "${MOUNTS[@]}" 2>&1; then
         log "${C_RED}omp-sbx: failed to create sandbox${C_RST}"
         exit 1
       fi
       sleep 2
-      exec sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME"
+      exec sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" "${SBX_ENV_ARGS[@]:-}"
     fi
   fi
 else
@@ -192,7 +183,7 @@ else
     # is usually a name collision with a stopped sandbox left by a force-quit.
     # sbx exec starts a stopped sandbox, so fall through and let it run.
     if ! sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
-        omp "$WORKDIR" "${MOUNTS[@]}" >/dev/null 2>&1; then
+        "${SBX_ENV_ARGS[@]:-}" omp "$WORKDIR" "${MOUNTS[@]}" >/dev/null 2>&1; then
       : # already exists or transient — sbx exec surfaces real errors
     else
       sleep 2
@@ -200,5 +191,5 @@ else
   fi
   # Use the same init path as interactive sessions so workspace and plugin
   # initialization cannot be bypassed by one-shot commands or verification.
-  exec sbx exec -w /home/agent "$SANDBOX_NAME" omp-init.sh "$@"
+  exec sbx exec "${SBX_ENV_ARGS[@]:-}" -w /home/agent "$SANDBOX_NAME" omp-init.sh "$@"
 fi
