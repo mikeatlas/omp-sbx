@@ -74,8 +74,8 @@ The sandbox forwards your host `gh` CLI session so that `gh` commands and `git p
 **Prerequisites.**
 
 1. On the host: `gh auth login` (creates `~/.config/gh/hosts.yml`).
-2. `github.com:443` must be in the network allow-list (it is by default — see `sbx-kit/spec.yaml`).
-
+2. Store the GitHub secret so the sbx proxy can substitute a real token: `sbx secret set github --command 'gh auth token'`. Without it, `gh` and `git push` fail with `401 Unauthorized` (the proxy injects only a placeholder `GH_TOKEN`).
+3. `github.com:443` must be in the network allow-list (it is by default — see `sbx-kit/spec.yaml`).
 **Verifying.** Inside the sandbox:
 
 ```bash
@@ -84,7 +84,7 @@ gh status           # dashboard of assigned issues/PRs/mentions
 git push            # uses gh credential helper, no separate token needed
 ```
 
-If `gh auth status` fails, the host's `~/.config/gh` is not mounted — recreate the sandbox with `omp --new`. This happens when the directory was absent on the host at sandbox-creation time; mounting is decided once, at launch.
+If `gh auth status` fails with `401`, ensure the GitHub secret is stored (`sbx secret ls`). If it fails because the mount is missing, recreate the sandbox with `omp --new` — mounting is decided once, at launch. On macOS, `hosts.yml` contains no token (it lives in the keychain), so `sbx secret set github` is required.
 
 ### LSP servers
 
