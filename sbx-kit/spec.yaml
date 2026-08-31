@@ -100,8 +100,17 @@ setup:
         - "-c"
         - |
           # Symlink host ~/.omp mount to /home/agent/.omp
+          # NOTE: the image ships a real ~/.omp dir (created by `omp --version`
+          # at Docker build time). `ln -sf` against an existing directory nests
+          # the symlink inside it (produces ~/.omp/.omp) instead of replacing it,
+          # so omp silently runs against a fresh sandbox-local config with no
+          # logins/models/customization. rm -rf first — on a symlink it removes
+          # only the link, never the host target.
           OMP_HOST=$(awk '/virtiofs/{print $2}' /proc/mounts | grep '/\.omp$' | head -1)
-          [ -n "$OMP_HOST" ] && ln -sf "$OMP_HOST" "$HOME/.omp" || true
+          if [ -n "$OMP_HOST" ]; then
+            rm -rf "$HOME/.omp"
+            ln -s "$OMP_HOST" "$HOME/.omp"
+          fi
           # Symlink host ~/.config/gh mount to /home/agent/.config/gh (gh CLI session)
           GH_HOST=$(mount | grep 'type virtiofs' | grep '/.config/gh ' | sed 's/.* on //; s/ type.*//' | head -1)
           if [ -n "$GH_HOST" ] && [ "$GH_HOST" != "$HOME/.config/gh" ]; then
