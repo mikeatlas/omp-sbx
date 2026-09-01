@@ -24,6 +24,20 @@ if [ -d "$MORPH_CFG_DIR" ]; then
     ln -sf "$MORPH_CFG_DIR/morph.env" "$HOME/.pi/morph/morph.env" || true
 fi
 
+# ── Unsubstituted GH_TOKEN placeholder ──────────────────────────────────────
+# sbx always injects a GH_TOKEN placeholder (gho_sbxproxymanaged...) so its
+# proxy can substitute a real token when a `github` secret is registered
+# (`sbx secret set github`). Without one, the placeholder is left as-is —
+# and gh CLI's env vars take precedence over any stored/mounted credentials
+# (`gh help environment`), so it silently shadows the working, file-based
+# `~/.config/gh` forwarding set up above and in spec.yaml, breaking `gh`
+# and `git push` with an "invalid token" error instead of falling back.
+# Strip only the recognizable placeholder — a real substituted token (once
+# a `github` secret is registered) is left untouched.
+case "${GH_TOKEN:-}" in
+  gho_sbxproxymanaged*) unset GH_TOKEN ;;
+esac
+
 # The sbx startup hook replaces this path with a symlink to the host workspace.
 # Enter it only after the hook has completed, rather than declaring it as the
 # image WORKDIR where sbx's own setup execs would depend on it.
