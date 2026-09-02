@@ -78,6 +78,9 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/local/bin/chromium
 # ── omp prebuilt binary ──────────────────────────────────────────────────────
 # Self-extracts pi_natives.linux-<arch>.node into ~/.omp/natives/<version>/
 # on first run. sbx workspace mounts handle ~/.omp persistence.
+# The `omp --version` smoke test creates /home/agent/.omp as a side effect; it
+# must not survive into the image, or the startup hook cannot replace that path
+# with the symlink to the host ~/.omp mount (see sbx-kit/spec.yaml).
 ARG OMP_VERSION=16.1.15
 RUN ARCH="$(uname -m)" && \
     case "$ARCH" in \
@@ -88,7 +91,8 @@ RUN ARCH="$(uname -m)" && \
     curl -fsSL "https://github.com/can1357/oh-my-pi/releases/download/v${OMP_VERSION}/omp-linux-${OMP_ARCH}" \
       -o /home/agent/.local/bin/omp && \
     chmod +x /home/agent/.local/bin/omp && \
-    omp --version
+    omp --version && \
+    rm -rf /home/agent/.omp
 
 # ── pi-morphllm-plugin (optional, opt-in via build arg) ─────────────────────
 # Morph runtime extension: adds morph_fastapply, warpgrep_codebase_search,

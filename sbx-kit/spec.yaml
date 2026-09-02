@@ -99,17 +99,22 @@ setup:
         - "bash"
         - "-c"
         - |
-          # Symlink host ~/.omp mount to /home/agent/.omp
-          # NOTE: the image ships a real ~/.omp dir (created by `omp --version`
-          # at Docker build time). `ln -sf` against an existing directory nests
-          # the symlink inside it (produces ~/.omp/.omp) instead of replacing it,
-          # so omp silently runs against a fresh sandbox-local config with no
-          # logins/models/customization. rm -rf first — on a symlink it removes
-          # only the link, never the host target.
+          # Symlink host ~/.omp mount to /home/agent/.omp. The image ships a
+          # real /home/agent/.omp (the Dockerfile's `omp --version` self-extract
+          # step creates it), so a bare `ln -sf` would silently drop the link
+          # *inside* that directory as ~/.omp/.omp and leave omp reading a
+          # container-local config — no host ~/.omp/agent/.env, models.yml,
+          # sessions or agent.db. Clear a non-symlink target first, and use -n
+          # so a re-run does not dereference an existing link and write
+          # <host>/.omp/.omp on the host. The rm is safe: setup.startup runs at
+          # `sbx create` time only (verified — it does not re-run on stop/start),
+          # so this only ever clears image content in a fresh container, never a
+          # user's accumulated state. `omp-sbx --new` already removes the old
+          # sandbox before creating the new one.
           OMP_HOST=$(awk '/virtiofs/{print $2}' /proc/mounts | grep '/\.omp$' | head -1)
-          if [ -n "$OMP_HOST" ]; then
-            rm -rf "$HOME/.omp"
-            ln -s "$OMP_HOST" "$HOME/.omp"
+          if [ -n "$OMP_HOST" ] && [ "$OMP_HOST" != "$HOME/.omp" ]; then
+            [ -L "$HOME/.omp" ] || rm -rf "$HOME/.omp"
+            ln -sfn "$OMP_HOST" "$HOME/.omp"
           fi
           # Symlink host ~/.config/gh mount to /home/agent/.config/gh (gh CLI session)
           GH_HOST=$(mount | grep 'type virtiofs' | grep '/.config/gh ' | sed 's/.* on //; s/ type.*//' | head -1)
