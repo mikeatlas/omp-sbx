@@ -13,8 +13,3 @@ additionalWorkspaces:
   - path: ${HOME}/.omp
 sandboxOptions:
   template: omp-sbx:latest
-env:
-  # Native Morph API key (optional). Unlike sbx-kit/spec.yaml's
-  # environment.variables map, ${VAR} here expands to the real value from
-  # omp-sbxenv's shell environment.
-  MORPH_API_KEY: ${MORPH_API_KEY:-}

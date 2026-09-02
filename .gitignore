@@ -2,4 +2,3 @@
 .history/
 *.code-workspace
 .env
-sbx-kit/morphllm/__pycache__/
