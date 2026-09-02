@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# verify-tls-trust.sh — confirm the sbx proxy CA is properly trusted and
-# that the sandbox is NOT running with blanket cert-error bypass.
+# verify-tls-trust.sh - check that the sbx proxy CA is trusted and that cert
+# validation is on, not bypassed.
 #
-# Run from inside an omp-sbx sandbox after rebuilding with the hardened spec:
+# Run it inside a sandbox:
 #   bash sbx-kit/verify-tls-trust.sh
 #
-# Each check prints PASS or FAIL with a short explanation.
-# Exit code is 0 only if every check passes.
+# It exits 0 only when every check passes.
 
 set -euo pipefail
 
@@ -98,8 +97,8 @@ else
 fi
 
 # ── 6a. Allowed domain reachable without proxy env ───────────────────────────
-# sbx permits permissions.network.allow at the network level — stripping proxy
-# env vars should not break access to permitted domains.
+# sbx enforces the allow-list at the network level, so dropping the proxy env
+# vars must not change either verdict below.
 _head "6a. Allowed domain reachable without proxy env (${ALLOWED_HOST})"
 allowed_direct=$(env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
   curl -sf --max-time 10 -o /dev/null -w "%{http_code}" "https://${ALLOWED_HOST}" 2>&1) || true
@@ -111,7 +110,6 @@ else
 fi
 
 # ── 6b. Non-allowed domain blocked even without proxy env ─────────────────────
-# Blocked domains should be rejected at the network level regardless of proxy config.
 _head "6b. Non-allowed domain blocked without proxy env (${BLOCKED_HOST})"
 blocked_direct=$(env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
   curl -sv --max-time 5 "https://${BLOCKED_HOST}" 2>&1) || true

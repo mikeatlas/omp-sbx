@@ -1,26 +1,20 @@
 #!/usr/bin/env bash
 ###############################################################################
-# omp-sbxenv — EXPERIMENTAL alternative to omp-sbx using Docker sbx's
-# declarative `.sbxenv.yaml` + `sbx env` commands (sbx v0.39+; Docker itself
-# marks `sbx env` experimental and subject to change).
+# omp-sbxenv - EXPERIMENTAL launcher built on `sbx env` and .sbxenv.yaml
+# (sbx v0.39+; Docker marks `sbx env` experimental too).
 #
-# Trade-offs vs omp-sbx:
-#   - No force-quit recovery cascade (re-attach -> restart -> recreate).
-#   - No ~/.config/gh forwarding: a static .sbxenv.yaml can't conditionally
-#     mount a path that may not exist on every host, and sbx prompts
-#     interactively (hangs non-interactively) if additionalWorkspaces points
-#     at a missing directory.
-#   - Re-running `sbx env run` on an existing environment only re-applies
-#     env/MCP changes; other .sbxenv.yaml edits need --new.
+#   omp-sbxenv                 create if needed, then attach
+#   omp-sbxenv --new           remove and recreate
+#   omp-sbxenv --version       passthrough omp flags
+#   omp-sbxenv "fix the bug"   one-shot prompt
 #
-# Reach for this for scripted/CI runs where sbx-native `sbx env create` +
-# `sbx env exec` + `sbx env rm` fits better than a bespoke launcher. For
-# day-to-day interactive use, prefer `omp-sbx`.
-#
-#   $ omp-sbxenv              # create (if needed) + attach, interactive TUI
-#   $ omp-sbxenv --new        # remove + recreate
-#   $ omp-sbxenv --version    # passthrough omp flags (via sbx env exec)
-#   $ omp-sbxenv "fix the bug"# one-shot prompt (via sbx env exec)
+# Use this for scripted or CI runs. For interactive work prefer omp-sbx: this
+# gives up three of its behaviors.
+#   - no recovery cascade after a force-quit, just create-or-reuse
+#   - no ~/.config/gh forwarding: a static file cannot skip a mount that some
+#     hosts lack, and sbx prompts (so CI hangs) on a missing directory
+#   - `sbx env run` on an existing environment only re-applies env and MCP
+#     changes, so other .sbxenv.yaml edits need --new
 ###############################################################################
 set -euo pipefail
 
@@ -75,8 +69,8 @@ if [ "$#" -eq 0 ] && [ -t 0 ]; then
   # Interactive TUI: `sbx env run` creates (if needed) and attaches.
   exec sbx env run "$KIT_DIR"
 else
-  # Non-interactive: create if needed (idempotent — errors if it already
-  # exists, which sbx env exec below then starts/uses), then exec omp.
+  # Ignore a failed create: it means the environment already exists, and
+  # `sbx env exec` starts it either way.
   sbx env create "$KIT_DIR" >/dev/null 2>&1 || true
   exec sbx env exec "$KIT_DIR" -- omp "$@"
 fi

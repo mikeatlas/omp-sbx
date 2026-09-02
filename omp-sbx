@@ -1,23 +1,19 @@
 #!/usr/bin/env bash
 ###############################################################################
-# omp-sbx — launch omp inside a Docker sbx sandbox.
+# omp-sbx - launch omp inside a Docker sbx sandbox.
 #
-#   $ omp-sbx              # → resume/reconnect to existing sandbox (or create)
-#   $ omp-sbx --new        # → destroy existing sandbox and create fresh
-#   $ omp-sbx --version    # → passthrough omp flags (via sbx exec)
-#   $ omp-sbx "fix the bug"# → one-shot prompt (via sbx exec)
+#   omp-sbx                 reconnect to this directory's sandbox, or create it
+#   omp-sbx --new           destroy it and start fresh
+#   omp-sbx --version       passthrough omp flags
+#   omp-sbx "fix the bug"   one-shot prompt
 #
-# Sandboxes are per-directory: running from the same cwd reconnects to the
-# same sandbox (omp session state persists). Use --new to start fresh.
-#
-# Mounts:
-#   $PWD              → /home/agent/workspace   (primary workspace, rw)
-#   $HOME/.omp        → /Users/<user>/.omp      (host path, rw — configs shared)
-#                       symlinked to /home/agent/.omp by the kit's startup cmd
+# The sandbox name comes from the directory name, so a second run from the
+# same cwd resumes the same omp session. $PWD is the workspace; $HOME/.omp
+# is mounted at its host path and symlinked into place by omp-init.sh.
 ###############################################################################
 set -euo pipefail
 
-# Resolve the repo root from the script's location (portable symlink resolution).
+# Follow symlinks so the repo root resolves from a launcher on $PATH.
 SCRIPT_PATH="$0"
 while [ -L "$SCRIPT_PATH" ]; do
   SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
@@ -60,22 +56,16 @@ if [ ! -d "$HOME/.omp" ]; then
   exit 1
 fi
 
-# Host paths to bind-mount into the sandbox (in addition to the workspace).
-# ~/.config/gh is optional — only mounted if present on the host, so the gh
-# CLI session (hosts.yml + oauth_token) carries into the container.
+# Mounting the host gh session is what makes `gh` and `git push` work inside
+# the sandbox.
 MOUNTS=("$HOME/.omp")
 if [ -d "$HOME/.config/gh" ]; then
   MOUNTS+=("$HOME/.config/gh")
 fi
 
-# Linked git worktrees keep their HEAD/index in the main repo's
-# .git/worktrees/<name>/ and share the main repo's object database — the
-# worktree's own .git is just a pointer *file* (not a directory) containing
-# an absolute host path into the main repo. If we only mount the worktree
-# itself, that path doesn't exist inside the sandbox and git is unusable
-# ("fatal: not a git repository"). Detect this and mount the main repo
-# alongside it (rw — worktree operations need to write shared refs/objects),
-# at its own host path so the pointer resolves.
+# In a linked worktree, .git is a file pointing at an absolute host path
+# inside the main repo. Mount the main repo too, at that same path, or git
+# reports "fatal: not a git repository". It needs rw for refs and objects.
 if [ -f "$(pwd)/.git" ]; then
   GIT_COMMON_DIR="$(git -C "$(pwd)" rev-parse --git-common-dir 2>/dev/null || true)"
   if [ -n "$GIT_COMMON_DIR" ]; then
@@ -94,14 +84,11 @@ fi
 WORKDIR="$(pwd)"
 SANDBOX_NAME="omp-$(basename "$WORKDIR" | tr '_' '-' | tr -cd '[:alnum:]_-')"
 
-# ── Check if sandbox already exists ──────────────────────────────────────────
 sandbox_exists() {
-  # Use awk to match the SANDBOX column exactly (first field, avoids
-  # false positives like omp-Foo matching omp-Foo-parallel2).
+  # Exact match on the first column: omp-foo must not match omp-foo-parallel2.
   sbx ls 2>/dev/null | awk -v name="$1" 'NR>1 && $1 == name {found=1} END {exit !found}'
 }
 
-# Handle --new: remove existing sandbox before creating
 if $FORCE_NEW && sandbox_exists "$SANDBOX_NAME"; then
   log "${C_DIM}omp-sbx: removing existing sandbox '$SANDBOX_NAME' (--new)${C_RST}"
   sbx rm -f "$SANDBOX_NAME" >/dev/null 2>&1 || true
@@ -130,25 +117,18 @@ fi
 log "${C_BOLD}${C_CYAN}╰─ starting omp inside the sbx sandbox ──────────────────────╯${C_RST}"
 log ""
 # ── Launch ───────────────────────────────────────────────────────────────────
-# Two-phase approach for interactive mode:
-#   1. sbx create (non-interactive) — captures warnings to stderr where the
-#      user can read them before omp clears the screen.
-#   2. Pause — "press any key" gives time to read the warnings.
-#   3. sbx run --name (attaches to TUI) — omp launches and clears screen.
-# For non-interactive mode, reuse the sandbox or create silently, then exec.
+# Interactive mode creates and attaches in separate steps, with a pause in
+# between, because attaching hands the screen to omp and any sbx warning from
+# create scrolls away unread.
 if [ "$#" -eq 0 ] && [ -t 0 ]; then
-  # Interactive TUI.
   if ! $EXISTS; then
-    # Phase 1: create the sandbox, surfacing warnings on stderr. Capture the
-    # output so a failed create can be classified: a "name already taken"
-    # error is a false negative from sandbox_exists — after a force-quit the
-    # sandbox is left stopped, and sbx ls may omit stopped sandboxes, so our
-    # name match missed it and we tried to create over an existing name.
-    # Recover by re-attaching (Phase 3) instead of erroring out.
+    # `sbx ls` can omit a stopped sandbox, so a name collision here means the
+    # sandbox does exist (a force-quit left it stopped) and attaching will
+    # find it. Any other failure is real.
     if create_out="$(sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
         omp "$WORKDIR" "${MOUNTS[@]}" 2>&1)"; then
       if [ -n "$create_out" ]; then printf '%s\n' "$create_out" >&2; fi
-      # Wait for startup commands (symlink creation) to complete.
+      # Let the startup hook finish its symlinks.
       sleep 2
     else
       if [ -n "$create_out" ]; then printf '%s\n' "$create_out" >&2; fi
@@ -161,7 +141,6 @@ if [ "$#" -eq 0 ] && [ -t 0 ]; then
     fi
   fi
 
-  # Phase 2: pause so the user can read sbx warnings before omp clears screen.
   if ! $SKIP_PAUSE; then
     log ""
     log "${C_GREEN}Press any key to launch omp (or --yes to skip this)...${C_RST}"
@@ -169,12 +148,10 @@ if [ "$#" -eq 0 ] && [ -t 0 ]; then
     log ""
   fi
 
-  # Phase 3: attach to the sandbox TUI. Must pass --kit so sbx knows the "omp"
-  # agent definition (it's not a built-in agent). sbx run --name re-attaches to
-  # a running agent, or restarts a stopped sandbox's agent. If re-attach fails
-  # (a force-quit can leave the agent process wedged), stop+restart the sandbox;
-  # omp session state lives in the shared ~/.omp mount so the conversation
-  # resumes. Last resort: remove + recreate.
+  # --kit is required on every run: "omp" is not a built-in sbx agent. A
+  # force-quit can wedge the agent process, so escalate on failure - restart
+  # the sandbox, then recreate it. The conversation resumes either way,
+  # because session state lives in the shared ~/.omp mount.
   if ! sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1; then
     log "${C_DIM}omp-sbx: re-attach failed; restarting sandbox...${C_RST}"
     sbx stop "$SANDBOX_NAME" >/dev/null 2>&1 || true
@@ -191,19 +168,18 @@ if [ "$#" -eq 0 ] && [ -t 0 ]; then
     fi
   fi
 else
-  # Non-interactive — create if needed, then exec omp with args.
   if ! $EXISTS; then
-    # Same false-negative recovery as interactive mode: a create failure here
-    # is usually a name collision with a stopped sandbox left by a force-quit.
-    # sbx exec starts a stopped sandbox, so fall through and let it run.
+    # Ignore a failed create: it usually means a stopped sandbox already holds
+    # the name, and sbx exec starts a stopped sandbox anyway. Real errors show
+    # up there.
     if ! sbx create --kit "$KIT_DIR" --template "$TEMPLATE" --name "$SANDBOX_NAME" \
         omp "$WORKDIR" "${MOUNTS[@]}" >/dev/null 2>&1; then
-      : # already exists or transient — sbx exec surfaces real errors
+      :
     else
       sleep 2
     fi
   fi
-  # Use the same init path as interactive sessions so workspace setup cannot
-  # be bypassed by one-shot commands or verification.
+  # Go through omp-init.sh, as an interactive session does, so a one-shot
+  # command cannot skip the workspace setup.
   exec sbx exec -w /home/agent "$SANDBOX_NAME" omp-init.sh "$@"
 fi

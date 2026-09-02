@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
 # Shared preflight: ensure the sbx CLI is installed.
 #
-# Source this file after colors and log() are defined, then call:
-#   ensure_sbx "<script-name>"
-#
-# If sbx is missing the user is shown an OS-specific install plan and asked
-# to approve it interactively (no override flag — the prompt is mandatory).
-# Non-interactive contexts (no TTY) print instructions and exit.
+# Source this file after colors and log() are defined, then call
+# `ensure_sbx "<script-name>"`. It never installs without an interactive
+# yes, and there is deliberately no flag to skip the prompt.
 
-# Safety-net fallbacks in case the caller didn't define every color.
+# Fall back to no color if the caller defined only some of them.
 : "${C_DIM:=}"; : "${C_CYAN:=}"; : "${C_GREEN:=}"; : "${C_YELLOW:=}"
 : "${C_RED:=}"; : "${C_BOLD:=}"; : "${C_RST:=}"
 if ! command -v log >/dev/null 2>&1; then
@@ -24,7 +21,7 @@ ensure_sbx() {
 
   log "${C_RED}${script_name}: sbx CLI not found.${C_RST}"
 
-  # Non-interactive: can't offer a guided install.
+  # No TTY: print the plan and stop, since the install needs a yes.
   if [ ! -t 0 ]; then
     log "${C_DIM}Install sbx and re-run. See: https://github.com/docker/sbx${C_RST}"
     exit 1
@@ -63,7 +60,7 @@ ensure_sbx() {
       ;;
   esac
 
-  # ── Ask for approval (always required — no override flag) ─────────────────
+  # ── Ask for approval ─────────────────────────────────────────────────────
   log ""
   printf '%sRun these steps now? [y/N] %s' "$C_GREEN" "$C_RST" >&2
   local reply
@@ -90,8 +87,7 @@ ensure_sbx() {
       sudo apt-get install -y docker-sbx || {
         log "${C_RED}apt-get install docker-sbx failed${C_RST}"; exit 1; }
       sudo usermod -aG kvm "$USER" || { log "${C_RED}usermod kvm failed${C_RST}"; exit 1; }
-      # newgrp can't apply inside a script (it spawns a subshell).  The kvm
-      # group membership takes effect on the next login / new terminal.
+      # newgrp spawns a subshell, so it cannot take effect from in here.
       log "${C_YELLOW}Note: run 'newgrp kvm' (or log out/in) for kvm access.${C_RST}"
       sbx login || { log "${C_RED}sbx login failed${C_RST}"; exit 1; }
       ;;
