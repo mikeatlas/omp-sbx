@@ -36,19 +36,17 @@ agentInstructions:
     (articles, docs, JSON, PDFs) prefer the `read` tool on a URL — no browser needed.
 
 # ── Network ──────────────────────────────────────────────────────────────────
-# omp needs to reach model API providers. The sbx proxy injects API keys from
-# the host secret store; inside the sandbox only a placeholder is visible.
 permissions:
   network:
     allow:
-      # Model providers — add the ones you use
+      # Model providers - add the ones you use
       - "api.anthropic.com:443"
       - "api.openai.com:443"
       - "openrouter.ai:443"
       - "*.openrouter.ai:443"
       - "opencode.ai:443"
       - "*.opencode.ai:443"
-      # omp release downloads (native addon self-extraction, updates)
+      # omp release downloads and self-update
       - "github.com:443"
       - "*.githubusercontent.com:443"
       - "raw.githubusercontent.com:443"
@@ -56,28 +54,25 @@ permissions:
       - "registry.npmjs.org:443"
       - "pypi.org:443"
       - "files.pythonhosted.org:443"
-      # Local model servers (host.docker.internal resolves to host)
+      # Local model servers on the host
       - "host.docker.internal:*"
-      # AI/doc context
+      # Docs and context providers
       - "*.context7.com:443"
       - "code.visualstudio.com:443"
       - "*.cloudflare.com:443"
-      # Playwright browser downloads (runtime browser install/upgrade)
+      # Playwright browser downloads
       - "cdn.playwright.dev:443"
       - "playwright.download.prss.microsoft.com:443"
 
 # ── Environment ──────────────────────────────────────────────────────────────
-# PI_CONFIG_DIR=.omp makes omp use ~/.omp (the symlink to the host mount).
 environment:
   variables:
+    # .omp resolves to ~/.omp, the symlink to the host config mount.
     PI_CONFIG_DIR: ".omp"
     HOME: "/home/agent"
     GH_CONFIG_DIR: "/home/agent/.config/gh"
-    # agent-browser: Playwright Chromium binary (stable symlink in the image)
     AGENT_BROWSER_EXECUTABLE_PATH: "/usr/local/bin/chromium"
-    # sbx injects the proxy CA into the OS trust store at runtime and sets
-    # HTTP_PROXY/HTTPS_PROXY — agent-browser picks both up automatically.
-    # Do not disable certificate validation; the CA is already trusted.
+    # Keep validation on: sbx puts its proxy CA in the OS trust store.
     AGENT_BROWSER_IGNORE_HTTPS_ERRORS: "false"
 
 setup:
@@ -86,28 +81,22 @@ setup:
         - "bash"
         - "-c"
         - |
-          # ~/.omp is symlinked synchronously in omp-init.sh (the entrypoint),
-          # before omp starts — see the comment there for why this can't
-          # safely happen in this startup hook (it races with omp's own
-          # startup and loses).
-          # Symlink host ~/.config/gh mount to /home/agent/.config/gh (gh CLI session)
+          # ~/.omp is symlinked in omp-init.sh instead - this hook races omp's
+          # own startup and loses.
           GH_HOST=$(mount | grep 'type virtiofs' | grep '/.config/gh ' | sed 's/.* on //; s/ type.*//' | head -1)
           if [ -n "$GH_HOST" ] && [ "$GH_HOST" != "$HOME/.config/gh" ]; then
             mkdir -p "$HOME/.config"
             rm -rf "$HOME/.config/gh"
             ln -sf "$GH_HOST" "$HOME/.config/gh"
           fi
-          # Configure git to use gh as a credential helper (enables `git push`
-          # over HTTPS by leveraging the gh OAuth token from the mounted session).
-          # setup-git just writes git config — it doesn't validate the token,
-          # so we only check that hosts.yml is present (auth status would also
-          # require network to github.com, which may not be reachable yet).
+          # Point git at gh's credential helper, so `git push` over HTTPS uses
+          # the mounted session. hosts.yml is the only check possible here:
+          # `gh auth status` needs github.com, which may not be reachable yet.
           if [ -f "$HOME/.config/gh/hosts.yml" ]; then
             gh auth setup-git 2>/dev/null || true
           fi
-          # Symlink the primary workspace to the stable path omp uses. sbx
-          # exposes the exact host mount as WORKSPACE_DIR; scanning `mount`
-          # is unsafe because /etc/hosts is also a virtiofs mount.
+          # Trust WORKSPACE_DIR for the host mount path. Scanning `mount`
+          # instead would also match /etc/hosts, another virtiofs mount.
           WS_HOST="${WORKSPACE_DIR:-}"
           if [ -d "$WS_HOST" ] && [ "$WS_HOST" != "/home/agent/workspace" ]; then
             rm -rf /home/agent/workspace

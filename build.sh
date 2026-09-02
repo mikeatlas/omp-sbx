@@ -1,24 +1,17 @@
 #!/usr/bin/env bash
 # Build and load the omp-sbx template image into the sbx runtime.
 #
-# OMP_VERSION resolution:
-#   - unset            → OMP_VERSION_PINNED below (reproducible default)
-#   - OMP_VERSION=latest → fetch the latest GitHub release tag (with the
-#     cooldown check described below)
-#   - OMP_VERSION=X.Y.Z → pin explicitly, no network call for version
-#     resolution
+# OMP_VERSION picks the omp release to bake in: unset uses the pin below,
+# X.Y.Z pins explicitly, and "latest" resolves the newest GitHub release.
+# "latest" also refuses a release younger than RELEASE_COOLDOWN_DAYS unless
+# you confirm, which buys time for a compromised upstream to be caught:
 #
-# Release cooldown: when fetching "latest", the script warns if the release
-# is newer than RELEASE_COOLDOWN_DAYS (default: 3) and asks for confirmation.
-# This protects against 0-day/compromised upstreams.
-# Override with: RELEASE_COOLDOWN_DAYS=0 OMP_VERSION=latest ./build.sh
+#   RELEASE_COOLDOWN_DAYS=0 OMP_VERSION=latest ./build.sh
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RELEASE_COOLDOWN_DAYS="${RELEASE_COOLDOWN_DAYS:-3}"
-# Last synced 2026-08-25. Bump when you want a newer baseline; omp still
-# self-updates at runtime, so this only sets the image's starting version.
-OMP_VERSION_PINNED="18.0.4"
+OMP_VERSION_PINNED="18.0.4"  # image baseline; omp self-updates at runtime
 
 # Colors (only when stderr is a tty)
 if [ -t 2 ]; then
@@ -27,7 +20,7 @@ else
   C_DIM=''; C_CYAN=''; C_YELLOW=''; C_RED=''; C_GREEN=''; C_BOLD=''; C_RST=''
 fi
 
-# ── Preflight: ensure sbx CLI is installed ──────────────────────────────────
+# ── Preflight ───────────────────────────────────────────────────────────────
 # shellcheck source=sbx-preflight.sh
 source "$DIR/sbx-preflight.sh"
 ensure_sbx "build.sh"
@@ -38,18 +31,15 @@ if [ -z "${OMP_VERSION:-}" ]; then
 elif [ "$OMP_VERSION" = "latest" ]; then
   echo ">> fetching latest omp release tag" >&2
 
-  # Fetch release info: tag name and published date in one call.
   RELEASE_JSON="$(curl -fsSL https://api.github.com/repos/can1357/oh-my-pi/releases/latest)"
   OMP_VERSION="$(printf '%s\n' "$RELEASE_JSON" | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p' | head -1)"
   PUBLISHED_AT="$(printf '%s\n' "$RELEASE_JSON" | sed -n 's/.*"published_at": *"\([^"]*\)".*/\1/p' | head -1)"
 
   OMP_VERSION="${OMP_VERSION:?could not determine OMP_VERSION}"
 
-  # Release cooldown check: warn if the release is newer than the cooldown period.
-  # Skip if RELEASE_COOLDOWN_DAYS=0 or if we can't parse the date.
+  # An unparseable date skips the cooldown rather than blocking the build.
   if [ "${RELEASE_COOLDOWN_DAYS}" -gt 0 ] && [ -n "$PUBLISHED_AT" ]; then
-    # Convert published_at to epoch seconds (portable: works on macOS and Linux).
-    # GitHub returns ISO 8601 like "2026-06-22T15:30:00Z".
+    # BSD date first, then GNU date - this runs on macOS and Linux.
     RELEASE_TS="$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$PUBLISHED_AT" +%s 2>/dev/null || \
                   date -u -d "$PUBLISHED_AT" +%s 2>/dev/null || echo "")"
     NOW_TS="$(date -u +%s)"

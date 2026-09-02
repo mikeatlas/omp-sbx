@@ -1,34 +1,20 @@
 # syntax=docker/dockerfile:1.7
 ###############################################################################
-# omp-sbx-template — custom sandbox template for the omp coding agent.
+# omp-sbx-template - sandbox template for the omp coding agent.
 #
-# Extends docker/sandbox-templates:shell-nightly, which already provides:
-#   • Ubuntu 26.04, non-root `agent` user (UID 1000) with passwordless sudo
-#   • tini as PID 1, /home/agent/workspace as working dir
-#   • Node.js 22, Python 3.14, Go, Java, Git, Docker CLI, ripgrep, jq
-#   • sbx microVM security (network policies, secret proxy, resource limits)
+# The base image (docker/sandbox-templates:shell-nightly) supplies Ubuntu, the
+# non-root `agent` user, Node, Python, Go, Java, git and the sbx microVM
+# security model. This adds the omp binary, bun, uv, LSP servers,
+# agent-browser and the dev tools the shell template leaves out.
 #
-# This template adds:
-#   • omp prebuilt binary (self-extracts pi_natives on first run)
-#   • bun, uv (for the pi kernel + python skills)
-#   • LSP servers (pyright, typescript-language-server, bash-language-server, gopls)
-#   • agent-browser + Playwright Chromium (browser automation — replaces Puppeteer, which can't spawn in sbx)
-#   • Missing dev tools (fd, fzf, sqlite3, build-essential)
-#
-# Build + load into sbx:
-#   docker build -t omp-sbx:latest -f sbx-kit/Dockerfile .
-#   docker image save omp-sbx:latest -o /tmp/omp-sbx.tar
-#   sbx template load /tmp/omp-sbx.tar
-#
-# Run with the omp kit:
-#   sbx run --kit ./sbx-kit --template omp-sbx:latest omp
+# Build and load with ./build.sh.
 ###############################################################################
 
 FROM docker/sandbox-templates:shell-nightly
 
 USER root
 
-# ── Missing dev tools from the shell template ────────────────────────────────
+# ── Dev tools and Chromium's shared libraries ────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
       fd-find fzf sqlite3 build-essential pkg-config libssl-dev \
       unzip xz-utils file less procps \
@@ -51,23 +37,18 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/home/agent/.local/bin:${PATH}"
 
 # ── LSP servers ──────────────────────────────────────────────────────────────
-# npm-based servers
 RUN npm install -g pyright typescript-language-server typescript bash-language-server
-# gopls (Go language server) — base image has Go; binary lands in $GOPATH/bin
 RUN go install golang.org/x/tools/gopls@latest
 ENV PATH="/home/agent/go/bin:${PATH}"
 
 # ── agent-browser + Chromium (Playwright build) ──────────────────────────────
-# agent-browser is a native Rust CLI for AI browser automation. The omp
-# `browser` tool (Puppeteer/Chromium) cannot spawn inside the sbx microVM
-# (ENOEXEC on the bundled chrome-linux64 binary). Ubuntu's chromium-browser
-# apt package is a snap stub that also fails in containers. Playwright ships a
-# real Chromium with Linux ARM64 builds — install it and symlink to a stable
-# path so agent-browser can find it via AGENT_BROWSER_EXECUTABLE_PATH.
+# The omp `browser` tool cannot spawn its bundled Chromium in the microVM
+# (ENOEXEC), and Ubuntu's chromium-browser package is a snap stub that also
+# fails in containers. Playwright's Chromium is a real ARM64 build, and
+# agent-browser drives it through AGENT_BROWSER_EXECUTABLE_PATH.
 RUN npm install -g agent-browser
 RUN npx playwright@1.61.1 install chromium
-# Symlink Playwright Chromium into /usr/local/bin (requires root).
-# The glob resolves at build time after the download completes.
+# The glob resolves once the download above completes.
 USER root
 RUN ln -sf /home/agent/.cache/ms-playwright/chromium-*/chrome-linux/chrome \
            /usr/local/bin/chromium
@@ -75,11 +56,9 @@ USER agent
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/local/bin/chromium
 
 # ── omp prebuilt binary ──────────────────────────────────────────────────────
-# Self-extracts pi_natives.linux-<arch>.node into ~/.omp/natives/<version>/
-# on first run. sbx workspace mounts handle ~/.omp persistence.
-# The `omp --version` smoke test creates /home/agent/.omp as a side effect; it
-# must not survive into the image, or the startup hook cannot replace that path
-# with the symlink to the host ~/.omp mount (see sbx-kit/spec.yaml).
+# The `omp --version` smoke test creates /home/agent/.omp on the way out, so
+# delete it: omp-init.sh replaces that path with a symlink to the host mount,
+# and a real directory there gets the symlink nested inside it instead.
 ARG OMP_VERSION=16.1.15
 RUN ARCH="$(uname -m)" && \
     case "$ARCH" in \
@@ -103,11 +82,9 @@ USER agent
 ENV PI_CONFIG_DIR=.omp \
     HOME=/home/agent
 
-# Keep the image working directory stable while sbx runs its startup hooks.
-# spec.yaml replaces /home/agent/workspace with a symlink to the host mount;
-# using that mutable path as WORKDIR makes later OCI execs fail under sbx 0.39.
+# Not /home/agent/workspace: the startup hook swaps that path for a symlink,
+# and OCI execs against a moving WORKDIR fail.
 WORKDIR /home/agent
 
-# Override the base image's flavor label so sbx recognizes this template as
-# built for the "omp" agent (suppresses the "built for shell agent" warning).
+# Tells sbx this template is built for the "omp" agent, not the base shell one.
 LABEL com.docker.sandboxes.flavor="omp"

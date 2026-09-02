@@ -1,15 +1,14 @@
 schemaVersion: "1"
-# Templated by omp-sbxenv at launch time — do not hardcode a name/workspace
-# here, since this one file is reused for every project directory.
+# omp-sbxenv fills these in at launch: one file serves every project
+# directory, so nothing here is hardcoded.
 name: ${OMP_SBXENV_NAME}
 agent: omp
 kits:
   - ${OMP_SBXENV_KIT_DIR}
 workspace: ${OMP_SBXENV_WORKSPACE}
 additionalWorkspaces:
-  # ~/.omp persists agent.db, managed-skills, memories, and sessions across
-  # sandbox restarts. Must exist on the host — `sbx env create` prompts
-  # interactively (and hangs in non-interactive/CI contexts) if it doesn't.
+  # Host ~/.omp keeps sessions, skills and memories across restarts. It has
+  # to exist: `sbx env create` prompts for a missing path, so CI hangs.
   - path: ${HOME}/.omp
 sandboxOptions:
   template: omp-sbx:latest
