@@ -79,6 +79,28 @@ if [ -d "$HOME/.config/gh" ]; then
   MOUNTS+=("$HOME/.config/gh")
 fi
 
+# Linked git worktrees keep their HEAD/index in the main repo's
+# .git/worktrees/<name>/ and share the main repo's object database — the
+# worktree's own .git is just a pointer *file* (not a directory) containing
+# an absolute host path into the main repo. If we only mount the worktree
+# itself, that path doesn't exist inside the sandbox and git is unusable
+# ("fatal: not a git repository"). Detect this and mount the main repo
+# alongside it (rw — worktree operations need to write shared refs/objects),
+# at its own host path so the pointer resolves.
+if [ -f "$(pwd)/.git" ]; then
+  GIT_COMMON_DIR="$(git -C "$(pwd)" rev-parse --git-common-dir 2>/dev/null || true)"
+  if [ -n "$GIT_COMMON_DIR" ]; then
+    case "$GIT_COMMON_DIR" in
+      /*) ;;
+      *) GIT_COMMON_DIR="$(pwd)/$GIT_COMMON_DIR" ;;
+    esac
+    MAIN_REPO_ROOT="$(cd "$(dirname "$GIT_COMMON_DIR")" && pwd)"
+    if [ "$MAIN_REPO_ROOT" != "$(pwd)" ] && [ -d "$MAIN_REPO_ROOT" ]; then
+      MOUNTS+=("$MAIN_REPO_ROOT")
+    fi
+  fi
+fi
+
 # ── Sandbox name (per-directory) ─────────────────────────────────────────────
 WORKDIR="$(pwd)"
 SANDBOX_NAME="omp-$(basename "$WORKDIR" | tr '_' '-' | tr -cd '[:alnum:]_-')"
@@ -106,6 +128,9 @@ log "${C_CYAN}│${C_RST} workspace : ${WORKDIR}  ${C_DIM}→ /home/agent/worksp
 log "${C_CYAN}│${C_RST} config    : ${HOME}/.omp  ${C_DIM}(shared, via symlink)${C_RST}"
 if [ -d "$HOME/.config/gh" ]; then
   log "${C_CYAN}│${C_RST} gh session: ${HOME}/.config/gh  ${C_DIM}(shared, via symlink)${C_RST}"
+fi
+if [ -n "${MAIN_REPO_ROOT:-}" ]; then
+  log "${C_CYAN}│${C_RST} main repo : ${MAIN_REPO_ROOT}  ${C_DIM}(linked worktree, mounted rw)${C_RST}"
 fi
 log "${C_CYAN}│${C_RST} sandbox   : ${SANDBOX_NAME}  ${C_DIM}($([ "$EXISTS" = true ] && echo 'resuming' || echo 'new'))${C_RST}"
 if [ "$#" -eq 0 ]; then
