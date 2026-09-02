@@ -74,11 +74,6 @@ if [ ${#OMP_ARGS[@]} -gt 0 ]; then set -- "${OMP_ARGS[@]}"; else set --; fi
 # shellcheck source=sbx-preflight.sh
 source "$REPO_DIR/sbx-preflight.sh"
 ensure_sbx "omp-sbx-parallel"
-# Source .env if present (gitignored — copy from .env.example).
-# Exports MORPH_API_KEY etc. so sbx can substitute ${MORPH_API_KEY} in spec.yaml.
-if [ -f "$REPO_DIR/.env" ]; then
-  set -a; source "$REPO_DIR/.env"; set +a
-fi
 
 if ! command -v git >/dev/null 2>&1; then
   log "${C_RED}omp-sbx-parallel: git not found${C_RST}"
@@ -445,7 +440,7 @@ else
       sleep 2
     fi
   fi
-  # Use the same init path as interactive sessions so workspace and plugin
-  # initialization cannot be bypassed by one-shot commands.
+  # Use the same init path as interactive sessions so workspace setup cannot
+  # be bypassed by one-shot commands.
   exec sbx exec -w /home/agent "$SANDBOX_NAME" omp-init.sh "$@"
 fi

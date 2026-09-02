@@ -137,39 +137,6 @@ The sbx TLS proxy intercepts HTTPS, so `AGENT_BROWSER_IGNORE_HTTPS_ERRORS=true` 
 
 Changing the `agent-browser` or Playwright Chromium version requires a rebuild (`./build.sh`) + `omp --new`.
 
-### Morph plugin (pi-morphllm-plugin, opt-in)
-
-[`pi-morphllm-plugin`](https://github.com/rickicode/pi-morphllm-plugin) adds four Morph-powered capabilities to omp: `morph_fastapply` (partial-snippet edits), `warpgrep_codebase_search` (local codebase search), `warpgrep_github_search` (public GitHub source search), and Morph compaction. It's **opt-in** — the default build excludes it.
-
-**Enable:** set `INSTALL_MORPH_PLUGIN=1` and rebuild.
-
-```bash
-cp .env.example .env      # then edit: INSTALL_MORPH_PLUGIN=1
-./build.sh
-```
-
-`.env` is gitignored. Both `build.sh` and `omp-sbx` source it, so a key set there reaches the sandbox automatically. Disable per-project without rebuilding: `omp plugin disable pi-morphllm-plugin`.
-
-The plugin targets upstream `pi`; the build auto-applies three omp-specific compatibility patches so it works cleanly here: a `withFileMutationQueue` shim, a pre-bundled Morph SDK, and a GitHub-search patch that prefers Morph's repo-search backend and falls back to a shallow public `git clone` when that backend is unavailable.
-
-#### API key (first match wins)
-
-1. **`MORPH_API_KEY`** in `.env` → native Morph endpoint (`api.morphllm.com`). **All four tools work.** Get a key at [morphllm.com](https://morphllm.com).
-2. **OpenRouter key** (from omp's auth store via `omp token openrouter`) → OpenRouter endpoint. Only `morph_fastapply` works; the others need Morph's proprietary API and fall back to native omp tools.
-
-`omp-sbx` passes the key to the sandbox with `sbx create`/`run -e MORPH_API_KEY` (sbx does not expand `${VAR}` placeholders in `spec.yaml` environment variables, so a native `-e` flag is used instead). The kit's startup script then writes it to `~/.omp/morph/morph.env` (host-mounted, so it persists across sandbox restarts) and symlinks it into `~/.pi/morph/` at each start.
-
-| Tool | Morph key | OpenRouter key |
-|---|---|---|
-| `morph_fastapply` | ✅ | ✅ (`morph/morph-v3-large`) |
-| `warpgrep_codebase_search` | ✅ | ❌ |
-| `warpgrep_github_search` | ✅ | ❌ |
-| Morph compaction | ✅ | ❌ |
-
-`warpgrep_github_search` first tries Morph's remote repo backend at `repos.morphllm.com`. If that import path is unavailable, the patched plugin shallow-clones the public repo from GitHub and runs WarpGrep locally, so the tool still succeeds inside sbx.
-
-**Verify:** run `/morph_status` or invoke `warpgrep_github_search` against a public repo. If the morph config is missing after a resume, recreate the sandbox with `omp-sbx --new`.
-
 ### Security
 
 All security is handled by the sbx microVM — no manual `cap_drop`, `gosu`, `umask`, or read-only rootfs configuration needed:

@@ -43,10 +43,6 @@ log() { printf '%s\n' "$*" >&2; }
 # shellcheck source=sbx-preflight.sh
 source "$REPO_DIR/sbx-preflight.sh"
 ensure_sbx "omp-sbxenv"
-# Source .env if present (gitignored — copy from .env.example).
-if [ -f "$REPO_DIR/.env" ]; then
-  set -a; source "$REPO_DIR/.env"; set +a
-fi
 
 if [ ! -d "$HOME/.omp" ]; then
   log "${C_RED}omp-sbxenv: host config dir not found: $HOME/.omp${C_RST}"

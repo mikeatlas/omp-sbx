@@ -13,7 +13,6 @@
 #   • bun, uv (for the pi kernel + python skills)
 #   • LSP servers (pyright, typescript-language-server, bash-language-server, gopls)
 #   • agent-browser + Playwright Chromium (browser automation — replaces Puppeteer, which can't spawn in sbx)
-#   • pi-morphllm-plugin (optional, opt-in via INSTALL_MORPH_PLUGIN=1 build arg)
 #   • Missing dev tools (fd, fzf, sqlite3, build-essential)
 #
 # Build + load into sbx:
@@ -94,29 +93,11 @@ RUN ARCH="$(uname -m)" && \
     omp --version && \
     rm -rf /home/agent/.omp
 
-# ── pi-morphllm-plugin (optional, opt-in via build arg) ─────────────────────
-# Morph runtime extension: adds morph_fastapply, warpgrep_codebase_search,
-# warpgrep_github_search tools + Morph compaction. Opt out by building with
-# INSTALL_MORPH_PLUGIN=0 (the default). When enabled, morph-install.sh
-# installs the npm package, applies three compatibility patches, and bundles
-# the Morph SDK so it loads correctly under omp's internal module loader.
-# See README "Morph plugin" section and sbx-kit/morphllm/README.md for details.
-ARG INSTALL_MORPH_PLUGIN=0
-
+# ── Entrypoint ───────────────────────────────────────────────────────────────
 USER root
-COPY sbx-kit/morphllm/morph.json.template /opt/morph-config/morph.json
-COPY sbx-kit/morphllm/morph-withfilemutationqueue.shim.js /opt/morph-config/withFileMutationQueue.shim.js
-COPY sbx-kit/morphllm/morph-install.sh /opt/morph-config/morph-install.sh
-COPY sbx-kit/morphllm/morph-patch.py /opt/morph-config/morph-patch.py
 COPY sbx-kit/omp-init.sh /usr/local/bin/omp-init.sh
-RUN chmod +x /opt/morph-config/morph-install.sh /usr/local/bin/omp-init.sh
-
+RUN chmod +x /usr/local/bin/omp-init.sh
 USER agent
-RUN if [ "${INSTALL_MORPH_PLUGIN}" = "1" ]; then \
-      /opt/morph-config/morph-install.sh; \
-    else \
-      echo ">> morph plugin install skipped (INSTALL_MORPH_PLUGIN=${INSTALL_MORPH_PLUGIN})"; \
-    fi
 
 # ── Environment ──────────────────────────────────────────────────────────────
 ENV PI_CONFIG_DIR=.omp \
