@@ -7,15 +7,24 @@ set -euo pipefail
 
 # ── Host config mount symlink ────────────────────────────────────────────────
 # The host ~/.omp lands at its own absolute path (e.g. /Users/ww/.omp), so
-# ~/.omp has to point at it. Replace a real directory rather than symlinking
-# into it: `ln -sf` onto an existing directory nests the link (~/.omp/.omp)
-# and omp then reads an empty local config, re-running first-time setup.
+# ~/.omp has to point at it.
+#
+# Both flags matter. Replace a real directory rather than symlinking into it:
+# plain `ln -s` onto an existing directory nests the link (~/.omp/.omp) and omp
+# then reads an empty local config, re-running first-time setup. -n covers the
+# same hazard on a second launch, where ~/.omp is already the symlink: without
+# it ln follows the link and writes the nested one into the host config dir.
 OMP_HOST="$(awk '/virtiofs/{print $2}' /proc/mounts | grep '/\.omp$' | head -1 || true)"
 if [ -n "$OMP_HOST" ] && [ "$OMP_HOST" != "$HOME/.omp" ]; then
   if [ -e "$HOME/.omp" ] && [ ! -L "$HOME/.omp" ]; then
     rm -rf "$HOME/.omp"
   fi
-  ln -sf "$OMP_HOST" "$HOME/.omp"
+  ln -sfn "$OMP_HOST" "$HOME/.omp"
+  # A .omp inside the config dir can only be that self-reference, and it makes
+  # a config lookup ambiguous.
+  if [ -L "$OMP_HOST/.omp" ]; then
+    rm -f "$OMP_HOST/.omp"
+  fi
 fi
 
 # ── Unsubstituted GH_TOKEN placeholder ──────────────────────────────────────

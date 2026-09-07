@@ -109,7 +109,7 @@ setup:
           if [ -n "$GH_HOST" ] && [ "$GH_HOST" != "$HOME/.config/gh" ]; then
             mkdir -p "$HOME/.config"
             rm -rf "$HOME/.config/gh"
-            ln -sf "$GH_HOST" "$HOME/.config/gh"
+            ln -sfn "$GH_HOST" "$HOME/.config/gh"
           fi
           # Point git at gh's credential helper, so `git push` over HTTPS uses
           # the mounted session. hosts.yml is the only check possible here:
@@ -122,7 +122,7 @@ setup:
           WS_HOST="${WORKSPACE_DIR:-}"
           if [ -d "$WS_HOST" ] && [ "$WS_HOST" != "/home/agent/workspace" ]; then
             rm -rf /home/agent/workspace
-            ln -sf "$WS_HOST" /home/agent/workspace
+            ln -sfn "$WS_HOST" /home/agent/workspace
           else
             echo "omp-sbx: workspace mount unavailable: ${WS_HOST:-unset}" >&2
             exit 1
