@@ -103,6 +103,11 @@ fi
 EXISTS=false
 sandbox_exists "$SANDBOX_NAME" && EXISTS=true
 
+# Checked before the banner so it reports "new" rather than "resuming".
+if $EXISTS && drop_stale_sandbox "$SANDBOX_NAME" "$KIT_DIR"; then
+  EXISTS=false
+fi
+
 # ── Banner ───────────────────────────────────────────────────────────────────
 log "${C_BOLD}${C_CYAN}╭─ omp-sbx ─────────────────────────────────────────────────╮${C_RST}"
 log "${C_CYAN}│${C_RST} template  : ${TEMPLATE}"
