@@ -58,6 +58,8 @@ omp "fix the bug"      # one-shot prompt
 | Launcher | `omp-sbx` | Wrapper handling banner, sandbox lifecycle, resume vs new |
 | Parallel | `omp-sbx-parallel` | Git worktree-based parallel sandbox launcher |
 | Browser CLI | `sbx-kit/Dockerfile` | Installs `agent-browser` (replaces Puppeteer, which can't spawn in sbx) |
+| Bedrock auth | `sbx-kit/omp-init.sh` | Opt-in AWS SSO profile with browserless renewal - see [Amazon Bedrock](#amazon-bedrock-aws-sso) |
+| SSO nudge | `sbx-kit/extensions/aws-sso-nudge.ts` | omp extension: warns before the SSO login lapses, adds `/aws-login` |
 
 ### Config sharing
 
@@ -85,6 +87,87 @@ git push            # uses gh credential helper, no separate token needed
 ```
 
 If `gh auth status` fails with `401`, ensure the GitHub secret is stored (`sbx secret ls`). If it fails because the mount is missing, recreate the sandbox with `omp --new` — mounting is decided once, at launch. On macOS, `hosts.yml` contains no token (it lives in the keychain), so `sbx secret set github` is required.
+
+### Amazon Bedrock (AWS SSO)
+
+Off by default. A project turns it on with one line in its `.env`:
+
+```bash
+OMP_SBX_AWS_PROFILE=infra-dev-bedrock
+OMP_SBX_AWS_REGION=us-east-1          # optional, defaults to us-east-1
+```
+
+Define that profile once in `~/.omp/aws-config` on the host. The file uses AWS
+CLI config syntax and holds no secrets:
+
+```ini
+[sso-session my-sso]
+sso_start_url = https://d-xxxxxxxxxx.awsapps.com/start
+sso_region = us-east-1
+sso_registration_scopes = sso:account:access
+
+[profile infra-dev-bedrock]
+sso_session = my-sso
+sso_account_id = 000000000000
+sso_role_name = Bedrock-Invoke-Only
+region = us-east-1
+```
+
+`~/.omp` is already bind-mounted, so editing `aws-config` takes effect on the
+next session - no rebuild.
+
+**The SSO token lives inside the sandbox, never on the host.** On first launch
+`aws sso login --no-browser` prints a verification URL and code; open it on your
+Mac and the token lands in the sandbox's own `~/.aws/sso/cache`. Nothing from
+your host `~/.aws` is mounted.
+
+**Renewal is browserless.** `omp-init.sh` generates an `omp-bedrock` profile
+whose `credential_process` calls `aws configure export-credentials`. omp reads
+the SSO access token but not the refresh token stored next to it, so on its own
+it treats an expired token as fatal. The AWS CLI does read that refresh token,
+so routing through it renews silently. This requires the `[sso-session]` profile
+shape above - a legacy profile with an inline `sso_start_url` gets no refresh
+token from the CLI.
+
+Three lifetimes stack up, and only the longest one needs you at a browser:
+
+| Layer | Typical lifetime | Renewal |
+|---|---|---|
+| Role credentials | 12 hours | Minted from the access token |
+| SSO access token | 1 hour | Silent, `grantType: refresh_token` |
+| Client registration | ~31 days | `aws sso login`, opening a URL |
+
+Read your own values from `~/.aws/sso/cache/*.json`: `expiresAt` is the access
+token and `registrationExpiresAt` on the same entry is the registration. The role
+credentials carry their own `Expiration`, visible via
+`aws configure export-credentials`.
+
+The role credentials are what actually sign a Bedrock request, and omp caches
+them for their full 12 hours. Only when they lapse does it re-read the SSO access
+token - which is an hour old at most, and which omp cannot renew. So without
+`credential_process` a session dies at the 12 hour mark, and a session started
+more than an hour after the last refresh fails immediately. Sending it through
+the CLI removes both cliffs, because the CLI renews the access token from the
+refresh token with no browser.
+
+One caveat worth knowing: `aws sso login` restarts authorization from scratch
+every time, even when the cached token is still valid. Only the credential path
+(`aws configure export-credentials`) refreshes silently, which is why the
+generated profile uses it.
+
+**The nudge extension** (`sbx-kit/extensions/aws-sso-nudge.ts`) covers the
+30-day boundary, which nothing renews on its own. Loaded only when Bedrock is
+on, it checks every 15 minutes, shows days remaining in the status line, and
+warns in the chat once fewer than 2 days remain (`OMP_SBX_AWS_SSO_WARN_DAYS`
+overrides the threshold). If credentials stop working mid-session, it runs the
+device-code login itself and puts the URL in the chat - open it on your host and
+the session recovers without a restart.
+
+`AWS_CA_BUNDLE` is set in `spec.yaml` because botocore ignores the OS trust
+store in favor of its own bundle, which the sbx TLS proxy would otherwise break.
+
+Adding a region means adding its `bedrock-runtime`, `oidc`, `portal.sso`, and
+`sts` hosts to the network allow-list in `sbx-kit/spec.yaml`.
 
 ### LSP servers
 

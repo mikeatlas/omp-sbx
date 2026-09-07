@@ -25,6 +25,15 @@ agentInstructions:
 
     `sudo` is passwordless; use it for system package installs.
 
+    Amazon Bedrock models are available only when the project `.env` sets
+    `OMP_SBX_AWS_PROFILE`. Credentials resolve through `credential_process`, so
+    the AWS CLI renews the short-lived access token on its own. Renewal stops
+    working once the SSO client registration lapses, which takes weeks. If an AWS
+    call reports an expired or missing token, run
+    `aws sso login --no-browser --profile "$OMP_SBX_AWS_PROFILE"` and give the
+    printed URL to the user to open - no browser runs inside this sandbox, so
+    never try to open it here.
+
     The omp `browser` tool (Puppeteer/Chromium) cannot spawn inside this microVM
     (ENOEXEC on the bundled chrome-linux64 binary). For browser automation use the
     installed `agent-browser` CLI instead (`agent-browser open <url>`, then
@@ -46,6 +55,14 @@ permissions:
       - "*.openrouter.ai:443"
       - "opencode.ai:443"
       - "*.opencode.ai:443"
+      # Amazon Bedrock, us-east-1. Add the hosts for another region to use it.
+      - "bedrock-runtime.us-east-1.amazonaws.com:443"
+      - "bedrock.us-east-1.amazonaws.com:443"
+      # AWS SSO: oidc serves the device-code login, portal.sso hands out role
+      # credentials, sts answers get-caller-identity.
+      - "oidc.us-east-1.amazonaws.com:443"
+      - "portal.sso.us-east-1.amazonaws.com:443"
+      - "sts.us-east-1.amazonaws.com:443"
       # omp release downloads and self-update
       - "github.com:443"
       - "*.githubusercontent.com:443"
@@ -74,6 +91,9 @@ environment:
     AGENT_BROWSER_EXECUTABLE_PATH: "/usr/local/bin/chromium"
     # Keep validation on: sbx puts its proxy CA in the OS trust store.
     AGENT_BROWSER_IGNORE_HTTPS_ERRORS: "false"
+    # botocore ships its own CA bundle and ignores the OS trust store, so every
+    # AWS call fails against the sbx TLS proxy until it is pointed back at it.
+    AWS_CA_BUNDLE: "/etc/ssl/certs/ca-certificates.crt"
 
 setup:
   startup:
