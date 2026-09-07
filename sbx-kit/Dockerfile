@@ -95,6 +95,8 @@ USER agent
 USER root
 COPY sbx-kit/omp-init.sh /usr/local/bin/omp-init.sh
 RUN chmod +x /usr/local/bin/omp-init.sh
+# omp-init.sh loads these only for a project that opts into Bedrock.
+COPY sbx-kit/extensions/ /opt/omp-sbx/extensions/
 USER agent
 
 # ── Environment ──────────────────────────────────────────────────────────────

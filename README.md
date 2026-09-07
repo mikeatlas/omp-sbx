@@ -59,6 +59,7 @@ omp "fix the bug"      # one-shot prompt
 | Parallel | `omp-sbx-parallel` | Git worktree-based parallel sandbox launcher |
 | Browser CLI | `sbx-kit/Dockerfile` | Installs `agent-browser` (replaces Puppeteer, which can't spawn in sbx) |
 | Bedrock auth | `sbx-kit/omp-init.sh` | Opt-in AWS SSO profile with browserless renewal - see [Amazon Bedrock](#amazon-bedrock-aws-sso) |
+| SSO nudge | `sbx-kit/extensions/aws-sso-nudge.ts` | omp extension: warns before the SSO login lapses, adds `/aws-login` |
 
 ### Config sharing
 
@@ -123,10 +124,31 @@ your host `~/.aws` is mounted.
 **Renewal is browserless.** `omp-init.sh` generates an `omp-bedrock` profile
 whose `credential_process` calls `aws configure export-credentials`. omp reads
 the SSO access token but not the refresh token stored next to it, so on its own
-it treats an expired session as fatal. The AWS CLI does read that refresh token,
-so routing through it renews silently for the life of the SSO session (up to 90
-days). This requires the `[sso-session]` profile shape above - a legacy profile
-with an inline `sso_start_url` gets no refresh token from the CLI.
+it treats an expired token as fatal. The AWS CLI does read that refresh token,
+so routing through it renews silently. This requires the `[sso-session]` profile
+shape above - a legacy profile with an inline `sso_start_url` gets no refresh
+token from the CLI.
+
+Two lifetimes matter, and only the second one needs you at a browser:
+
+| Thing | Typical lifetime | Renewal |
+|---|---|---|
+| SSO access token | 1 hour | Silent, by the AWS CLI |
+| Client registration | 30 days | `aws sso login`, opening a URL |
+
+Both come from your IAM Identity Center configuration. Read your own values from
+`~/.aws/sso/cache/*.json`: `expiresAt` is the access token, and
+`registrationExpiresAt` on the same entry is the registration. Without
+`credential_process` omp fails as soon as the access token lapses, so on these
+numbers it would break roughly hourly.
+
+**The nudge extension** (`sbx-kit/extensions/aws-sso-nudge.ts`) covers the
+30-day boundary, which nothing renews on its own. Loaded only when Bedrock is
+on, it checks every 15 minutes, shows days remaining in the status line, and
+warns in the chat once fewer than 2 days remain (`OMP_SBX_AWS_SSO_WARN_DAYS`
+overrides the threshold). If credentials stop working mid-session, it runs the
+device-code login itself and puts the URL in the chat - open it on your host and
+the session recovers without a restart.
 
 `AWS_CA_BUNDLE` is set in `spec.yaml` because botocore ignores the OS trust
 store in favor of its own bundle, which the sbx TLS proxy would otherwise break.

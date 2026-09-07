@@ -46,39 +46,54 @@ env_value() {
   printf '%s' "$val"
 }
 
+# Flags this script adds ahead of the caller's own, e.g. --extension.
+OMP_ARGS=()
+
 # Read the host path, not /home/agent/workspace: the symlink to it belongs to
 # the startup hook, which has not necessarily run yet.
 WORKSPACE_ENV="${WORKSPACE_DIR:-/home/agent/workspace}/.env"
-SSO_PROFILE=""
+AWS_SSO_PROFILE=""
 if [ -f "$WORKSPACE_ENV" ]; then
-  SSO_PROFILE="$(env_value OMP_SBX_AWS_PROFILE "$WORKSPACE_ENV")"
+  AWS_SSO_PROFILE="$(env_value OMP_SBX_AWS_PROFILE "$WORKSPACE_ENV")"
 fi
 
-if [ -n "$SSO_PROFILE" ]; then
+if [ -n "$AWS_SSO_PROFILE" ]; then
   AWS_CONFIG_SRC="$HOME/.omp/aws-config"
   if [ ! -f "$AWS_CONFIG_SRC" ]; then
-    echo "omp-sbx: OMP_SBX_AWS_PROFILE=$SSO_PROFILE needs a profile definition in ~/.omp/aws-config" >&2
+    echo "omp-sbx: OMP_SBX_AWS_PROFILE=$AWS_SSO_PROFILE needs a profile definition in ~/.omp/aws-config" >&2
   else
-    SSO_REGION="$(env_value OMP_SBX_AWS_REGION "$WORKSPACE_ENV")"
-    SSO_REGION="${SSO_REGION:-us-east-1}"
+    AWS_SSO_REGION="$(env_value OMP_SBX_AWS_REGION "$WORKSPACE_ENV")"
+    AWS_SSO_REGION="${AWS_SSO_REGION:-us-east-1}"
 
     mkdir -p "$HOME/.aws"
     {
       cat "$AWS_CONFIG_SRC"
       printf '\n[profile omp-bedrock]\n'
-      printf 'credential_process = aws configure export-credentials --profile %s --format process\n' "$SSO_PROFILE"
-      printf 'region = %s\n' "$SSO_REGION"
+      printf 'credential_process = aws configure export-credentials --profile %s --format process\n' "$AWS_SSO_PROFILE"
+      printf 'region = %s\n' "$AWS_SSO_REGION"
     } > "$HOME/.aws/config"
 
     export AWS_PROFILE="omp-bedrock"
-    export AWS_REGION="$SSO_REGION"
+    export AWS_REGION="$AWS_SSO_REGION"
+    # The nudge extension needs the SSO profile, not the generated one, to name
+    # the login command. Exporting it here avoids depending on omp's own .env
+    # load reaching the same file.
+    export OMP_SBX_AWS_PROFILE="$AWS_SSO_PROFILE"
+
+    # Watches the SSO login from inside the session and offers /aws-login. Only
+    # loaded for a project that opted in, so a project without Bedrock runs omp
+    # exactly as before.
+    NUDGE_EXTENSION="/opt/omp-sbx/extensions/aws-sso-nudge.ts"
+    if [ -f "$NUDGE_EXTENSION" ]; then
+      OMP_ARGS+=(--extension "$NUDGE_EXTENSION")
+    fi
 
     # A failed login leaves omp running without Bedrock rather than blocking the
     # session: the rest of the agent still works, and `aws sso login` can be
     # re-run from a shell inside the sandbox.
     if ! aws sts get-caller-identity --profile omp-bedrock >/dev/null 2>&1; then
-      echo "omp-sbx: the AWS SSO session for $SSO_PROFILE has expired. Open the URL below to renew it." >&2
-      aws sso login --no-browser --profile "$SSO_PROFILE" \
+      echo "omp-sbx: the AWS SSO login for $AWS_SSO_PROFILE needs renewing. Open the URL below on the host." >&2
+      aws sso login --no-browser --profile "$AWS_SSO_PROFILE" \
         || echo "omp-sbx: aws sso login failed - Bedrock models stay unavailable this session" >&2
     fi
   fi
@@ -88,4 +103,4 @@ fi
 # enter it here rather than declaring it as the image WORKDIR - sbx's own
 # setup execs run before the hook and would fail on a moving path.
 cd /home/agent/workspace
-exec omp "$@"
+exec omp "${OMP_ARGS[@]}" "$@"
