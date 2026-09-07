@@ -117,9 +117,14 @@ region = us-east-1
 next session - no rebuild.
 
 **The SSO token lives inside the sandbox, never on the host.** On first launch
-`aws sso login --no-browser` prints a verification URL and code; open it on your
-Mac and the token lands in the sandbox's own `~/.aws/sso/cache`. Nothing from
-your host `~/.aws` is mounted.
+`aws sso login --no-browser --use-device-code` prints a verification URL and
+code; open it on your Mac, enter the code, and the token lands in the sandbox's
+own `~/.aws/sso/cache`. Nothing from your host `~/.aws` is mounted.
+
+`--use-device-code` is required here, not a preference. Without it the CLI runs
+the PKCE flow, whose `redirect_uri` is a loopback port inside the sandbox, so the
+URL sends your browser to a port nothing listens on. The device grant pairs a URL
+with a typed code, so the browser and the waiting CLI share no network.
 
 **Renewal is browserless.** `omp-init.sh` generates an `omp-bedrock` profile
 whose `credential_process` calls `aws configure export-credentials`. omp reads

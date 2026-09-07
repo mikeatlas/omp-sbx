@@ -30,9 +30,11 @@ agentInstructions:
     the AWS CLI renews the short-lived access token on its own. Renewal stops
     working once the SSO client registration lapses, which takes weeks. If an AWS
     call reports an expired or missing token, run
-    `aws sso login --no-browser --profile "$OMP_SBX_AWS_PROFILE"` and give the
-    printed URL to the user to open - no browser runs inside this sandbox, so
-    never try to open it here.
+    `aws sso login --no-browser --use-device-code --profile "$OMP_SBX_AWS_PROFILE"`
+    and give the printed URL and code to the user to open - no browser runs inside
+    this sandbox, so never try to open it here. Keep `--use-device-code`: without
+    it the CLI prints a URL that redirects to a port inside this sandbox, which
+    the user's browser cannot reach.
 
     The omp `browser` tool (Puppeteer/Chromium) cannot spawn inside this microVM
     (ENOEXEC on the bundled chrome-linux64 binary). For browser automation use the

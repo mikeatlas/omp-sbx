@@ -88,12 +88,18 @@ if [ -n "$AWS_SSO_PROFILE" ]; then
       OMP_ARGS+=(--extension "$NUDGE_EXTENSION")
     fi
 
+    # --use-device-code is required, not a preference. The CLI otherwise runs the
+    # PKCE flow, whose redirect_uri is a loopback port inside this sandbox: the
+    # printed URL then sends the host browser to a port nothing listens on. The
+    # device grant instead pairs a URL with a code the user types, so the browser
+    # and the waiting CLI need no shared network.
+    #
     # A failed login leaves omp running without Bedrock rather than blocking the
     # session: the rest of the agent still works, and `aws sso login` can be
     # re-run from a shell inside the sandbox.
     if ! aws sts get-caller-identity --profile omp-bedrock >/dev/null 2>&1; then
       echo "omp-sbx: the AWS SSO login for $AWS_SSO_PROFILE needs renewing. Open the URL below on the host." >&2
-      aws sso login --no-browser --profile "$AWS_SSO_PROFILE" \
+      aws sso login --no-browser --use-device-code --profile "$AWS_SSO_PROFILE" \
         || echo "omp-sbx: aws sso login failed - Bedrock models stay unavailable this session" >&2
     fi
   fi
