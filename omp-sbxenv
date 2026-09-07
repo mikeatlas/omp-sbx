@@ -46,7 +46,12 @@ fi
 # Values referenced by ${VAR} in sbx-kit/.sbxenv.yaml.
 export OMP_SBXENV_KIT_DIR="$KIT_DIR"
 export OMP_SBXENV_WORKSPACE="$(pwd)"
-export OMP_SBXENV_NAME="omp-$(basename "$OMP_SBXENV_WORKSPACE" | tr -cd '[:alnum:]_-')"
+# Same prefix rule as omp-sbx: a directory already named omp-* keeps its name.
+SBXENV_SLUG="$(basename "$OMP_SBXENV_WORKSPACE" | tr -cd '[:alnum:]_-')"
+case "$SBXENV_SLUG" in
+  omp|omp-*) export OMP_SBXENV_NAME="$SBXENV_SLUG" ;;
+  *)         export OMP_SBXENV_NAME="omp-$SBXENV_SLUG" ;;
+esac
 
 # ── Parse flags ──────────────────────────────────────────────────────────────
 FORCE_NEW=false

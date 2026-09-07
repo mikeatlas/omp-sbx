@@ -81,8 +81,14 @@ if [ -f "$(pwd)/.git" ]; then
 fi
 
 # ── Sandbox name (per-directory) ─────────────────────────────────────────────
+# The omp- prefix groups these in `sbx ls`. A directory whose name already
+# carries it keeps its own, so ~/src/omp-sbx is omp-sbx, not omp-omp-sbx.
 WORKDIR="$(pwd)"
-SANDBOX_NAME="omp-$(basename "$WORKDIR" | tr '_' '-' | tr -cd '[:alnum:]_-')"
+SANDBOX_SLUG="$(basename "$WORKDIR" | tr '_' '-' | tr -cd '[:alnum:]_-')"
+case "$SANDBOX_SLUG" in
+  omp|omp-*) SANDBOX_NAME="$SANDBOX_SLUG" ;;
+  *)         SANDBOX_NAME="omp-$SANDBOX_SLUG" ;;
+esac
 
 sandbox_exists() {
   # Exact match on the first column: omp-foo must not match omp-foo-parallel2.
