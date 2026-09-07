@@ -58,6 +58,7 @@ omp "fix the bug"      # one-shot prompt
 | Launcher | `omp-sbx` | Wrapper handling banner, sandbox lifecycle, resume vs new |
 | Parallel | `omp-sbx-parallel` | Git worktree-based parallel sandbox launcher |
 | Browser CLI | `sbx-kit/Dockerfile` | Installs `agent-browser` (replaces Puppeteer, which can't spawn in sbx) |
+| Bedrock auth | `sbx-kit/omp-init.sh` | Opt-in AWS SSO profile with browserless renewal - see [Amazon Bedrock](#amazon-bedrock-aws-sso) |
 
 ### Config sharing
 
@@ -85,6 +86,53 @@ git push            # uses gh credential helper, no separate token needed
 ```
 
 If `gh auth status` fails with `401`, ensure the GitHub secret is stored (`sbx secret ls`). If it fails because the mount is missing, recreate the sandbox with `omp --new` — mounting is decided once, at launch. On macOS, `hosts.yml` contains no token (it lives in the keychain), so `sbx secret set github` is required.
+
+### Amazon Bedrock (AWS SSO)
+
+Off by default. A project turns it on with one line in its `.env`:
+
+```bash
+OMP_SBX_AWS_PROFILE=infra-dev-bedrock
+OMP_SBX_AWS_REGION=us-east-1          # optional, defaults to us-east-1
+```
+
+Define that profile once in `~/.omp/aws-config` on the host. The file uses AWS
+CLI config syntax and holds no secrets:
+
+```ini
+[sso-session my-sso]
+sso_start_url = https://d-xxxxxxxxxx.awsapps.com/start
+sso_region = us-east-1
+sso_registration_scopes = sso:account:access
+
+[profile infra-dev-bedrock]
+sso_session = my-sso
+sso_account_id = 000000000000
+sso_role_name = Bedrock-Invoke-Only
+region = us-east-1
+```
+
+`~/.omp` is already bind-mounted, so editing `aws-config` takes effect on the
+next session - no rebuild.
+
+**The SSO token lives inside the sandbox, never on the host.** On first launch
+`aws sso login --no-browser` prints a verification URL and code; open it on your
+Mac and the token lands in the sandbox's own `~/.aws/sso/cache`. Nothing from
+your host `~/.aws` is mounted.
+
+**Renewal is browserless.** `omp-init.sh` generates an `omp-bedrock` profile
+whose `credential_process` calls `aws configure export-credentials`. omp reads
+the SSO access token but not the refresh token stored next to it, so on its own
+it treats an expired session as fatal. The AWS CLI does read that refresh token,
+so routing through it renews silently for the life of the SSO session (up to 90
+days). This requires the `[sso-session]` profile shape above - a legacy profile
+with an inline `sso_start_url` gets no refresh token from the CLI.
+
+`AWS_CA_BUNDLE` is set in `spec.yaml` because botocore ignores the OS trust
+store in favor of its own bundle, which the sbx TLS proxy would otherwise break.
+
+Adding a region means adding its `bedrock-runtime`, `oidc`, `portal.sso`, and
+`sts` hosts to the network allow-list in `sbx-kit/spec.yaml`.
 
 ### LSP servers
 

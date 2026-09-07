@@ -59,7 +59,7 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/local/bin/chromium
 # The `omp --version` smoke test creates /home/agent/.omp on the way out, so
 # delete it: omp-init.sh replaces that path with a symlink to the host mount,
 # and a real directory there gets the symlink nested inside it instead.
-ARG OMP_VERSION=16.1.15
+ARG OMP_VERSION=18.1.10
 RUN ARCH="$(uname -m)" && \
     case "$ARCH" in \
       aarch64|arm64) OMP_ARCH="arm64" ;; \
@@ -71,6 +71,25 @@ RUN ARCH="$(uname -m)" && \
     chmod +x /home/agent/.local/bin/omp && \
     omp --version && \
     rm -rf /home/agent/.omp
+
+# ── AWS CLI v2 (Amazon Bedrock provider) ─────────────────────────────────────
+# Two jobs: the browserless SSO device-code login, and `credential_process`.
+# omp reads the SSO access token but not the refresh token beside it, so it
+# cannot renew an expired session; the CLI can, and omp calls out to it.
+USER root
+RUN ARCH="$(uname -m)" && \
+    case "$ARCH" in \
+      aarch64|arm64) AWS_ARCH="aarch64" ;; \
+      x86_64|amd64)  AWS_ARCH="x86_64"  ;; \
+      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+    esac && \
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}.zip" \
+      -o /tmp/awscli.zip && \
+    unzip -q /tmp/awscli.zip -d /tmp && \
+    /tmp/aws/install && \
+    rm -rf /tmp/awscli.zip /tmp/aws && \
+    aws --version
+USER agent
 
 # ── Entrypoint ───────────────────────────────────────────────────────────────
 USER root

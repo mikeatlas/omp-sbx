@@ -11,7 +11,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RELEASE_COOLDOWN_DAYS="${RELEASE_COOLDOWN_DAYS:-3}"
-OMP_VERSION_PINNED="18.0.4"  # image baseline; omp self-updates at runtime
+OMP_VERSION_PINNED="18.1.10"  # image baseline; omp self-updates at runtime
 
 # Colors (only when stderr is a tty)
 if [ -t 2 ]; then
@@ -64,7 +64,7 @@ elif [ "$OMP_VERSION" = "latest" ]; then
               echo "${C_DIM}proceeding with v${OMP_VERSION}${C_RST}" >&2
               ;;
             *)
-              echo "${C_RED}aborted. Pin a specific version with: OMP_VERSION=16.1.17 $0${C_RST}" >&2
+              echo "${C_RED}aborted. Pin a specific version with: OMP_VERSION=18.1.10 $0${C_RST}" >&2
               exit 1
               ;;
           esac
