@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Shared preflight: ensure the sbx CLI is installed.
+# Shared launcher preflight.
 #
-# Source this file after colors and log() are defined, then call
-# `ensure_sbx "<script-name>"`. It never installs without an interactive
-# yes, and there is deliberately no flag to skip the prompt.
+# Source this file after colors and log() are defined. It provides:
+#
+#   ensure_sbx "<script-name>"                 install the sbx CLI
+#   drop_stale_sandbox "<name>" "<kit-dir>"    discard a sandbox whose kit moved
 
 # Fall back to no color if the caller defined only some of them.
 : "${C_DIM:=}"; : "${C_CYAN:=}"; : "${C_GREEN:=}"; : "${C_YELLOW:=}"
@@ -12,6 +13,8 @@ if ! command -v log >/dev/null 2>&1; then
   log() { printf '%s\n' "$*" >&2; }
 fi
 
+# Installs the sbx CLI when it is missing. It never installs without an
+# interactive yes, and there is deliberately no flag to skip the prompt.
 ensure_sbx() {
   local script_name="${1:-omp-sbx}"
 
@@ -103,4 +106,34 @@ ensure_sbx() {
   log "${C_GREEN}✓ sbx installed and ready${C_RST}"
   log "${C_DIM}Re-run ${script_name} to start.${C_RST}"
   exit 0
+}
+
+# Removes a sandbox that was created from a different kit directory. Returns 0
+# when it removed one, so the caller can treat the sandbox as absent.
+#
+# sbx records the kit at create time and keeps it, so passing --kit on a later
+# run changes nothing. A sandbox from another checkout therefore runs that kit's
+# spec.yaml - including startup hooks the current kit has already fixed - and
+# fails somewhere far from the cause. Recreating is the only way to repoint it.
+drop_stale_sandbox() {
+  local name="$1" kit_dir="$2" recorded
+  recorded="$(sbx inspect "$name" 2>/dev/null | awk '
+    /^[[:space:]]*Kits:/ {
+      sub(/^[[:space:]]*Kits:[[:space:]]*/, "")
+      sub(/[[:space:]]*$/, "")
+      print
+      exit
+    }')"
+
+  # No sandbox, or an sbx that does not report the kit: leave it alone.
+  if [ -z "$recorded" ] || [ "$recorded" = "$kit_dir" ]; then
+    return 1
+  fi
+
+  log "${C_YELLOW}sandbox '${name}' was created from a different kit:${C_RST}"
+  log "${C_DIM}  recorded: ${recorded}${C_RST}"
+  log "${C_DIM}  current : ${kit_dir}${C_RST}"
+  log "${C_DIM}recreating it - sbx cannot repoint an existing sandbox${C_RST}"
+  sbx rm -f "$name" >/dev/null 2>&1 || true
+  return 0
 }

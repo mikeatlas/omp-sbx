@@ -349,6 +349,10 @@ sandbox_exists() {
   sbx ls 2>/dev/null | awk -v name="$1" 'NR>1 && $1 == name {found=1} END {exit !found}'
 }
 
+# Cleanup removes the sandbox on every exit path, so one survives only a
+# force-quit. Drop it here when its kit has moved since.
+drop_stale_sandbox "$SANDBOX_NAME" "$KIT_DIR" || true
+
 # Interactive mode creates and attaches in separate steps, with a pause in
 # between, because attaching hands the screen to omp and any sbx warning from
 # create scrolls away unread. The main repo's .git is mounted rw, or worktree
