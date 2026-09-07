@@ -3,10 +3,11 @@
  * error.
  *
  * omp-init.sh passes this with --extension only when a project opts into
- * Bedrock. Two lifetimes matter, and only the second one needs a human:
+ * Bedrock. Three lifetimes stack up, and only the longest needs a human:
  *
- *   - The access token lasts about an hour. The AWS CLI renews it from the
- *     cached refresh token, silently and with no browser.
+ *   - The role credentials that sign a request last about 12 hours.
+ *   - The access token they are minted from lasts about an hour. The AWS CLI
+ *     renews it from the cached refresh token, silently and with no browser.
  *   - The client registration behind that refresh token lasts about a month.
  *     Once it lapses, renewal stops working and someone has to visit a URL.
  *

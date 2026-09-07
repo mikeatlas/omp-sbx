@@ -129,18 +129,31 @@ so routing through it renews silently. This requires the `[sso-session]` profile
 shape above - a legacy profile with an inline `sso_start_url` gets no refresh
 token from the CLI.
 
-Two lifetimes matter, and only the second one needs you at a browser:
+Three lifetimes stack up, and only the longest one needs you at a browser:
 
-| Thing | Typical lifetime | Renewal |
+| Layer | Typical lifetime | Renewal |
 |---|---|---|
-| SSO access token | 1 hour | Silent, by the AWS CLI |
-| Client registration | 30 days | `aws sso login`, opening a URL |
+| Role credentials | 12 hours | Minted from the access token |
+| SSO access token | 1 hour | Silent, `grantType: refresh_token` |
+| Client registration | ~31 days | `aws sso login`, opening a URL |
 
-Both come from your IAM Identity Center configuration. Read your own values from
-`~/.aws/sso/cache/*.json`: `expiresAt` is the access token, and
-`registrationExpiresAt` on the same entry is the registration. Without
-`credential_process` omp fails as soon as the access token lapses, so on these
-numbers it would break roughly hourly.
+Read your own values from `~/.aws/sso/cache/*.json`: `expiresAt` is the access
+token and `registrationExpiresAt` on the same entry is the registration. The role
+credentials carry their own `Expiration`, visible via
+`aws configure export-credentials`.
+
+The role credentials are what actually sign a Bedrock request, and omp caches
+them for their full 12 hours. Only when they lapse does it re-read the SSO access
+token - which is an hour old at most, and which omp cannot renew. So without
+`credential_process` a session dies at the 12 hour mark, and a session started
+more than an hour after the last refresh fails immediately. Sending it through
+the CLI removes both cliffs, because the CLI renews the access token from the
+refresh token with no browser.
+
+One caveat worth knowing: `aws sso login` restarts authorization from scratch
+every time, even when the cached token is still valid. Only the credential path
+(`aws configure export-credentials`) refreshes silently, which is why the
+generated profile uses it.
 
 **The nudge extension** (`sbx-kit/extensions/aws-sso-nudge.ts`) covers the
 30-day boundary, which nothing renews on its own. Loaded only when Bedrock is
