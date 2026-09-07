@@ -25,6 +25,7 @@ const STATUS_KEY = "aws-sso";
 const CHECK_INTERVAL_MS = 15 * 60_000;
 const DEFAULT_WARN_DAYS = 2;
 const LOGIN_TIMEOUT_MS = 5 * 60_000;
+const ANNOUNCE_GRACE_MS = 2_000;
 
 interface Ui {
 	notify(message: string, type?: "info" | "warning" | "error"): void;
@@ -120,29 +121,55 @@ export default function (pi: Pi): void {
 	 * Runs the device-code login, reporting the URL through the chat.
 	 *
 	 * No browser runs in the sandbox, so the CLI's own "opening your browser"
-	 * path is useless here. --no-browser prints a URL to open on the host and
-	 * then blocks, polling, until the approval lands - which is exactly the wait
-	 * this needs. pi.exec buffers until exit, so it cannot show a URL that only
-	 * matters while the process is still running.
+	 * path is useless here. --no-browser prints a URL and then blocks, polling,
+	 * until the approval lands - which is exactly the wait this needs. pi.exec
+	 * buffers until exit, so it cannot show a URL that only matters while the
+	 * process is still running.
+	 *
+	 * --use-device-code is required, not a preference. The CLI otherwise runs the
+	 * PKCE flow, whose redirect_uri is a loopback port inside this sandbox: the
+	 * printed URL then sends the host browser to a port nothing listens on. The
+	 * device grant instead pairs a URL with a code the user types.
 	 */
 	function runLogin(ctx: Ctx): Promise<boolean> {
 		return new Promise((resolve) => {
-			const proc = spawn("aws", ["sso", "login", "--no-browser", "--profile", profile], {
-				stdio: ["ignore", "pipe", "pipe"],
-			});
+			const proc = spawn(
+				"aws",
+				["sso", "login", "--no-browser", "--use-device-code", "--profile", profile],
+				{ stdio: ["ignore", "pipe", "pipe"] },
+			);
 
 			let announced = false;
-			const scan = (chunk: Buffer) => {
+			let output = "";
+			let pending: ReturnType<typeof setTimeout> | undefined;
+
+			/** Reports the best login link the output has offered so far. */
+			const announce = () => {
 				if (announced) return;
-				const text = chunk.toString();
-				const url = /https:\/\/\S+/.exec(text)?.[0];
+				// The CLI also prints a link carrying the code, which spares the
+				// user the typing. Prefer it when it has arrived.
+				const url = (/https:\/\/\S*user_code=\S+/.exec(output) ?? /https:\/\/\S+/.exec(output))?.[0];
 				if (!url) return;
 				announced = true;
-				const code = /\b[A-Z]{4}-[A-Z]{4}\b/.exec(text)?.[0];
+				clearTimeout(pending);
+				const code = /\b[A-Z0-9]{4}-[A-Z0-9]{4}\b/.exec(output)?.[0];
 				ctx.ui.notify(
-					`AWS SSO login: open this on your host${code ? ` and confirm code ${code}` : ""}\n${url}`,
+					`AWS SSO login: open this on your host${code ? ` and enter code ${code}` : ""}\n${url}`,
 					"warning",
 				);
+			};
+
+			// Scanning each chunk alone would report the URL before the code, which
+			// the CLI prints a few lines later. Accumulate instead, and give the
+			// code a moment to arrive before settling for the URL by itself.
+			const scan = (chunk: Buffer) => {
+				if (announced) return;
+				output += chunk.toString();
+				if (/user_code=/.test(output)) {
+					announce();
+				} else if (/https:\/\//.test(output) && pending === undefined) {
+					pending = setTimeout(announce, ANNOUNCE_GRACE_MS);
+				}
 			};
 			proc.stdout?.on("data", scan);
 			proc.stderr?.on("data", scan);
@@ -150,14 +177,13 @@ export default function (pi: Pi): void {
 			// The CLI polls until the device code expires, which outlasts any
 			// useful wait inside a session.
 			const timeout = setTimeout(() => proc.kill(), LOGIN_TIMEOUT_MS);
-			proc.on("error", () => {
+			const settle = (ok: boolean) => {
 				clearTimeout(timeout);
-				resolve(false);
-			});
-			proc.on("close", (code: number | null) => {
-				clearTimeout(timeout);
-				resolve(code === 0);
-			});
+				clearTimeout(pending);
+				resolve(ok);
+			};
+			proc.on("error", () => settle(false));
+			proc.on("close", (code: number | null) => settle(code === 0));
 		});
 	}
 
@@ -173,7 +199,7 @@ export default function (pi: Pi): void {
 				warned = false;
 			} else {
 				ctx.ui.notify(
-					`AWS SSO login did not complete. Retry with /aws-login, or run: aws sso login --no-browser --profile ${profile}`,
+					`AWS SSO login did not complete. Retry with /aws-login, or run: aws sso login --no-browser --use-device-code --profile ${profile}`,
 					"error",
 				);
 			}
