@@ -92,7 +92,7 @@ fi
 #
 # The array also carries the flags every create shares, so it is never empty -
 # an empty array under `set -u` is an error in bash 3.2, still the macOS bash.
-CREATE_OPTS=(--kit "$KIT_DIR" --template "$TEMPLATE")
+CREATE_OPTS=(--template "$TEMPLATE")
 if [ -n "${OMP_SBX_STATIC_MCP:-}" ]; then
   CREATE_OPTS+=(--static-mcp "$OMP_SBX_STATIC_MCP")
 fi
@@ -151,7 +151,7 @@ if [ "$#" -eq 0 ] && [ -t 0 ]; then
     # sandbox does exist (a force-quit left it stopped) and attaching will
     # find it. Any other failure is real.
     if create_out="$(sbx create "${CREATE_OPTS[@]}" --name "$SANDBOX_NAME" \
-        omp "$WORKDIR" "${MOUNTS[@]}" 2>&1)"; then
+        "$KIT_DIR" "$WORKDIR" "${MOUNTS[@]}" 2>&1)"; then
       if [ -n "$create_out" ]; then printf '%s\n' "$create_out" >&2; fi
       # Let the startup hook finish its symlinks.
       sleep 2
@@ -173,23 +173,24 @@ if [ "$#" -eq 0 ] && [ -t 0 ]; then
     log ""
   fi
 
-  # --kit is required on every run: "omp" is not a built-in sbx agent. A
+  # No --kit here: sbx records it at create time and reads it back from the
+  # sandbox's own spec on re-attach, so passing it again changes nothing. A
   # force-quit can wedge the agent process, so escalate on failure - restart
   # the sandbox, then recreate it. The conversation resumes either way,
   # because session state lives in the shared ~/.omp mount.
-  if ! sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1; then
+  if ! sbx run --name "$SANDBOX_NAME" 2>&1; then
     log "${C_DIM}omp-sbx: re-attach failed; restarting sandbox...${C_RST}"
     sbx stop "$SANDBOX_NAME" >/dev/null 2>&1 || true
-    if ! sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME" 2>&1; then
+    if ! sbx run --name "$SANDBOX_NAME" 2>&1; then
       log "${C_DIM}omp-sbx: sandbox unresponsive, recreating...${C_RST}"
       sbx rm -f "$SANDBOX_NAME" >/dev/null 2>&1 || true
       if ! sbx create "${CREATE_OPTS[@]}" --name "$SANDBOX_NAME" \
-          omp "$WORKDIR" "${MOUNTS[@]}" 2>&1; then
+          "$KIT_DIR" "$WORKDIR" "${MOUNTS[@]}" 2>&1; then
         log "${C_RED}omp-sbx: failed to create sandbox${C_RST}"
         exit 1
       fi
       sleep 2
-      exec sbx run --kit "$KIT_DIR" --name "$SANDBOX_NAME"
+      exec sbx run --name "$SANDBOX_NAME"
     fi
   fi
 else
@@ -198,7 +199,7 @@ else
     # the name, and sbx exec starts a stopped sandbox anyway. Real errors show
     # up there.
     if ! sbx create "${CREATE_OPTS[@]}" --name "$SANDBOX_NAME" \
-        omp "$WORKDIR" "${MOUNTS[@]}" >/dev/null 2>&1; then
+        "$KIT_DIR" "$WORKDIR" "${MOUNTS[@]}" >/dev/null 2>&1; then
       :
     else
       sleep 2
