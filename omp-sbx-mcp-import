@@ -1,0 +1,298 @@
+#!/usr/bin/env bash
+###############################################################################
+# omp-sbx-mcp-import - register Claude Code's MCP servers with sbx.
+#
+#   omp-sbx-mcp-import                 show the plan, register what is missing
+#   omp-sbx-mcp-import --auth          also run the OAuth flow for remote ones
+#   omp-sbx-mcp-import --load          attach them to this directory's sandbox
+#   omp-sbx-mcp-import --sandbox NAME  attach them to a named sandbox
+#   omp-sbx-mcp-import --dry-run       print the plan and change nothing
+#   omp-sbx-mcp-import --force         re-register servers sbx already knows
+#   omp-sbx-mcp-import --file PATH     read a different config (repeatable)
+#
+# Claude keeps its servers in ~/.claude.json and per-project .mcp.json. sbx
+# keeps its own registry, and serves registered servers to a sandbox through a
+# gateway. Registering is a host-side act: a stdio server runs on the host, and
+# a remote server's OAuth flow opens a host browser. So the sandbox never needs
+# the credential, which is the point - a microVM has no keychain and no browser.
+#
+# Registration alone reaches no sandbox. There are two ways to finish, and they
+# do not mix:
+#
+#   sbx create --static-mcp notion,atlassian ...   fixed at create time
+#   omp-sbx-mcp-import --load                      attached to a live sandbox
+#
+# --load needs no restart, and a connected agent sees the new tools at once. A
+# static sandbox also hides the gateway's own mcp-add and mcp-find tools, so the
+# agent cannot register anything more on its own - pick that one when the tighter
+# set matters. Loading into a static sandbox misbehaves: the second load appears
+# to replace the first rather than add to it.
+#
+###############################################################################
+set -euo pipefail
+
+SCRIPT_PATH="$0"
+while [ -L "$SCRIPT_PATH" ]; do
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+  SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+  case "$SCRIPT_PATH" in /*) ;; *) SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH" ;; esac
+done
+REPO_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+
+if [ -t 2 ]; then
+  C_DIM=$'\033[2m'; C_CYAN=$'\033[36m'; C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'; C_BOLD=$'\033[1m'; C_RST=$'\033[0m'
+else
+  C_DIM=''; C_CYAN=''; C_GREEN=''; C_YELLOW=''; C_RED=''; C_BOLD=''; C_RST=''
+fi
+log() { printf '%s\n' "$*" >&2; }
+
+# Renders a command line for display with any VAR=value blanked, so a value
+# out of the Claude config never reaches the terminal or its scrollback.
+show() {
+  local arg out=""
+  for arg in "$@"; do
+    if [[ $arg =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then arg="${arg%%=*}=..."; fi
+    out="${out:+$out }$arg"
+  done
+  printf '%s' "$out"
+}
+
+# shellcheck source=sbx-preflight.sh
+source "$REPO_DIR/sbx-preflight.sh"
+ensure_sbx "omp-sbx-mcp-import"
+
+# ── Parse flags ──────────────────────────────────────────────────────────────
+DO_AUTH=false
+DRY_RUN=false
+FORCE=false
+LOAD_SANDBOX=""
+CONFIG_FILES=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --auth)    DO_AUTH=true ;;
+    --dry-run) DRY_RUN=true ;;
+    --force)   FORCE=true ;;
+    # The same rule every launcher uses, so --load finds the sandbox that
+    # omp-sbx creates from this directory.
+    --load)    LOAD_SANDBOX="$(sandbox_name_for "$(basename "$(pwd)")")" ;;
+    --sandbox) shift; [ $# -gt 0 ] || { log "${C_RED}--sandbox needs a name${C_RST}"; exit 1; }
+               LOAD_SANDBOX="$1" ;;
+    --file)    shift; [ $# -gt 0 ] || { log "${C_RED}--file needs a path${C_RST}"; exit 1; }
+               CONFIG_FILES+=("$1") ;;
+    # Read the help out of the header block, so the two cannot drift apart.
+    -h|--help) awk 'NR>2 && /^#####/ {exit} NR>2 {sub(/^# ?/, ""); print}' "$SCRIPT_PATH"
+               exit 0 ;;
+    *)         log "${C_RED}unknown flag: $1${C_RST}"; exit 1 ;;
+  esac
+  shift
+done
+
+# Claude's own two locations, unless the caller named others. A project file
+# only applies to the directory it sits in, so this reads the current one.
+if [ ${#CONFIG_FILES[@]} -eq 0 ]; then
+  CONFIG_FILES=("$HOME/.claude.json")
+  [ -f "$(pwd)/.mcp.json" ] && CONFIG_FILES+=("$(pwd)/.mcp.json")
+fi
+
+command -v python3 >/dev/null 2>&1 || {
+  log "${C_RED}omp-sbx-mcp-import: python3 is required to read the Claude config${C_RST}"
+  exit 1
+}
+
+# ── Read the servers ─────────────────────────────────────────────────────────
+# One record per server: name, kind, and the fields that kind needs. Ordering
+# keeps the output stable across runs.
+#
+# \x1e separates the fields and \x1f the args, because a tab would not work.
+# `read` collapses a run of whitespace delimiters into one, so a stdio server -
+# which has no url - would lose a field and shift every later one left.
+#
+# The parser goes to a temp file rather than a heredoc inside $(...). bash 3.2,
+# still the macOS bash, mis-parses an apostrophe in a quoted heredoc body when
+# the heredoc sits in a command substitution, and fails the whole file.
+PARSER="$(mktemp "${TMPDIR:-/tmp}/omp-sbx-mcp-import.XXXXXX")"
+trap 'rm -f "$PARSER"' EXIT
+
+cat >"$PARSER" <<'PY'
+import json, os, sys
+
+seen = {}
+for path in sys.argv[1:]:
+    if not os.path.isfile(path):
+        continue
+    try:
+        with open(path) as fh:
+            doc = json.load(fh)
+    except (json.JSONDecodeError, OSError) as err:
+        print(f"skip\t{path}\tunreadable: {err}", file=sys.stderr)
+        continue
+    # ~/.claude.json nests everything under mcpServers; a project .mcp.json
+    # uses the same key at its top level.
+    for name, cfg in (doc.get("mcpServers") or {}).items():
+        # An earlier file wins, matching Claude's own user-over-project order.
+        seen.setdefault(name, cfg)
+
+for name, cfg in sorted(seen.items()):
+    url = cfg.get("url") or ""
+    command = cfg.get("command") or ""
+    args = cfg.get("args") or []
+    cwd = cfg.get("dir") or cfg.get("cwd") or ""
+    env = cfg.get("env") or {}
+    pairs = "\x1f".join(f"{key}={env[key]}" for key in sorted(env))
+    kind = cfg.get("type") or ("http" if url else "stdio")
+    print("\x1e".join([name, kind, url, command, "\x1f".join(args), cwd, pairs]))
+PY
+
+SERVERS="$(python3 "$PARSER" "${CONFIG_FILES[@]}")"
+
+if [ -z "$SERVERS" ]; then
+  log "${C_YELLOW}no MCP servers found in:${C_RST}"
+  for f in "${CONFIG_FILES[@]}"; do log "${C_DIM}  $f${C_RST}"; done
+  exit 0
+fi
+
+# ── Register ─────────────────────────────────────────────────────────────────
+log ""
+log "${C_BOLD}Claude MCP servers -> sbx registry${C_RST}"
+log ""
+
+REGISTERED=()
+OAUTH_SERVERS=()
+SKIPPED=0
+
+while IFS=$'\x1e' read -r name kind url command args cwd envpairs; do
+  [ -n "$name" ] || continue
+
+  if sbx mcp inspect "$name" >/dev/null 2>&1 && ! $FORCE; then
+    log "${C_DIM}= ${name} already registered${C_RST}"
+    REGISTERED+=("$name")
+    case "$kind" in http|sse) OAUTH_SERVERS+=("$name") ;; esac
+    continue
+  fi
+
+  ADD_ARGS=("$name")
+  case "$kind" in
+    http|sse)
+      # --skip_auth keeps this pass non-interactive: one browser window per
+      # server in the middle of a loop is worse than a single --auth pass.
+      ADD_ARGS+=(--url "$url" --skip_auth)
+      OAUTH_SERVERS+=("$name")
+      ;;
+    stdio)
+      if [ -z "$command" ]; then
+        log "${C_YELLOW}! ${name} skipped - stdio server with no command${C_RST}"
+        SKIPPED=$((SKIPPED + 1))
+        continue
+      fi
+      # `sbx mcp add` takes no --env, so the variables ride through `env`,
+      # which sets them and then execs the real command. The values stay on
+      # this host: an stdio server runs here, and the sandbox reaches it
+      # through the gateway rather than running it itself.
+      if [ -n "$envpairs" ]; then
+        ADD_ARGS+=(--command env)
+        env_names=""
+        while IFS= read -r pair; do
+          [ -n "$pair" ] || continue
+          ADD_ARGS+=(--args "$pair")
+          env_names="${env_names:+$env_names,}${pair%%=*}"
+        done <<< "$(printf '%s' "$envpairs" | tr '\037' '\n')"
+        ADD_ARGS+=(--args "$command")
+        log "${C_DIM}  ${name}: carrying ${env_names} through env${C_RST}"
+      else
+        ADD_ARGS+=(--command "$command")
+      fi
+      if [ -n "$args" ]; then
+        # \x1f separates the args, so one carrying a space survives.
+        while IFS= read -r one; do
+          [ -n "$one" ] && ADD_ARGS+=(--args "$one")
+        done <<< "$(printf '%s' "$args" | tr '\037' '\n')"
+      fi
+      if [ -n "$cwd" ]; then
+        ADD_ARGS+=(--dir "$cwd")
+      fi
+      ;;
+    *)
+      log "${C_YELLOW}! ${name} skipped - unsupported type '${kind}'${C_RST}"
+      SKIPPED=$((SKIPPED + 1))
+      continue
+      ;;
+  esac
+
+  if $DRY_RUN; then
+    log "${C_CYAN}+ sbx mcp add $(show "${ADD_ARGS[@]}")${C_RST}"
+    REGISTERED+=("$name")
+    continue
+  fi
+
+  if sbx mcp add "${ADD_ARGS[@]}" >/dev/null 2>&1; then
+    log "${C_GREEN}+ ${name} registered (${kind})${C_RST}"
+    REGISTERED+=("$name")
+  else
+    # Re-run visibly: the failure reason is worth more than a tidy log.
+    log "${C_RED}x ${name} failed to register${C_RST}"
+    sbx mcp add "${ADD_ARGS[@]}" 2>&1 | sed 's/^/    /' >&2 || true
+    SKIPPED=$((SKIPPED + 1))
+  fi
+done <<< "$SERVERS"
+
+# ── Authorize ────────────────────────────────────────────────────────────────
+if $DO_AUTH && [ ${#OAUTH_SERVERS[@]} -gt 0 ] && ! $DRY_RUN; then
+  log ""
+  log "${C_BOLD}OAuth${C_RST} ${C_DIM}- each opens a browser on this host${C_RST}"
+  for name in "${OAUTH_SERVERS[@]}"; do
+    # "unauthorized" contains "authorized", so the negative case has to be
+    # tested first. `sbx mcp auth status` exits 0 either way.
+    status="$(sbx mcp auth status "$name" 2>&1 || true)"
+    case "$status" in
+      *unauthorized*) ;;
+      *authorized*)
+        log "${C_DIM}= ${name} already authorized${C_RST}"
+        continue
+        ;;
+    esac
+    log "${C_CYAN}> sbx mcp auth ${name}${C_RST}"
+    sbx mcp auth "$name" || log "${C_YELLOW}! ${name} not authorized${C_RST}"
+  done
+fi
+
+# ── Attach to a live sandbox ─────────────────────────────────────────────────
+if [ -n "$LOAD_SANDBOX" ] && [ ${#REGISTERED[@]} -gt 0 ] && ! $DRY_RUN; then
+  log ""
+  log "${C_BOLD}Attaching to '${LOAD_SANDBOX}'${C_RST} ${C_DIM}- no restart needed${C_RST}"
+  for name in "${REGISTERED[@]}"; do
+    if sbx mcp load "$name" --sandbox "$LOAD_SANDBOX" >/dev/null 2>&1; then
+      log "${C_GREEN}> ${name} attached${C_RST}"
+    else
+      log "${C_RED}x ${name} failed to attach${C_RST}"
+      sbx mcp load "$name" --sandbox "$LOAD_SANDBOX" 2>&1 | sed 's/^/    /' >&2 || true
+    fi
+  done
+fi
+
+# ── Report ───────────────────────────────────────────────────────────────────
+log ""
+if [ ${#REGISTERED[@]} -eq 0 ]; then
+  log "${C_YELLOW}nothing registered${C_RST}"
+  exit 1
+fi
+
+STATIC_MCP="$(IFS=,; printf '%s' "${REGISTERED[*]}")"
+log "${C_BOLD}Registered:${C_RST} ${STATIC_MCP}"
+[ "$SKIPPED" -gt 0 ] && log "${C_YELLOW}Skipped: ${SKIPPED}${C_RST}"
+
+if ! $DO_AUTH && [ ${#OAUTH_SERVERS[@]} -gt 0 ]; then
+  log ""
+  log "${C_DIM}Remote servers still need authorizing. Re-run with --auth, or:${C_RST}"
+  log "  ${C_CYAN}sbx mcp auth --all${C_RST}"
+fi
+
+if [ -z "$LOAD_SANDBOX" ]; then
+  log ""
+  log "${C_DIM}They reach no sandbox yet. Attach them to a running one:${C_RST}"
+  log "  ${C_CYAN}omp-sbx-mcp-import --load${C_RST}"
+  log "${C_DIM}or fix the set at create time, which also hides the gateway's own"
+  log "mcp-add and mcp-find tools from the agent:${C_RST}"
+  log "  ${C_CYAN}OMP_SBX_STATIC_MCP=${STATIC_MCP} omp-sbx --new${C_RST}"
+fi
+log ""
