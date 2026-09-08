@@ -162,11 +162,14 @@ generated profile uses it.
 
 **The nudge extension** (`sbx-kit/extensions/aws-sso-nudge.ts`) covers the
 30-day boundary, which nothing renews on its own. Loaded only when Bedrock is
-on, it checks every 15 minutes, shows days remaining in the status line, and
-warns in the chat once fewer than 2 days remain (`OMP_SBX_AWS_SSO_WARN_DAYS`
-overrides the threshold). If credentials stop working mid-session, it runs the
-device-code login itself and puts the URL in the chat - open it on your host and
-the session recovers without a restart.
+on, it checks every 15 minutes and warns in the chat once fewer than 2 days
+remain (`OMP_SBX_AWS_SSO_WARN_DAYS` overrides the threshold). If credentials stop
+working mid-session, it runs the device-code login itself and puts the URL in the
+chat - open it on your host and the session recovers without a restart.
+
+It stays out of the status line except while a login is waiting for approval.
+The registration is weeks from expiry nearly always, so a standing countdown is
+noise. Read the current values from `~/.aws/sso/cache/*.json` when you want them.
 
 `AWS_CA_BUNDLE` is set in `spec.yaml` because botocore ignores the OS trust
 store in favor of its own bundle, which the sbx TLS proxy would otherwise break.
