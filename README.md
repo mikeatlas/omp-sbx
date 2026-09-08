@@ -58,6 +58,7 @@ omp "fix the bug"      # one-shot prompt
 | Launcher | `omp-sbx` | Wrapper handling banner, sandbox lifecycle, resume vs new |
 | Parallel | `omp-sbx-parallel` | Git worktree-based parallel sandbox launcher |
 | MCP import | `omp-sbx-mcp-import` | Registers Claude Code's MCP servers with sbx - see [MCP servers](#mcp-servers-from-claude-code) |
+| MCP gateway | `sbx-kit/omp-init.sh` | Opt-in wiring that connects omp to the sandbox's MCP gateway |
 | Browser CLI | `sbx-kit/Dockerfile` | Installs `agent-browser` (replaces Puppeteer, which can't spawn in sbx) |
 | Bedrock auth | `sbx-kit/omp-init.sh` | Opt-in AWS SSO profile with browserless renewal - see [Amazon Bedrock](#amazon-bedrock-aws-sso) |
 | SSO nudge | `sbx-kit/extensions/aws-sso-nudge.ts` | omp extension: warns before the SSO login lapses, adds `/aws-login` |
@@ -122,6 +123,30 @@ reads its config from the environment gets wrapped in `env VAR=value <command>`.
 The values stay on the host, and the script prints them as `VAR=...` rather than
 echoing a secret. A server whose own binary fails to start on the host fails
 here too, and the attach step reports the reason.
+
+#### Letting omp see them
+
+Registering and attaching gets the servers onto the sandbox's gateway. omp still
+has to connect to it, which a project turns on with one line in its `.env`:
+
+```bash
+OMP_SBX_MCP_GATEWAY=1
+```
+
+Off by default. A gateway with nothing attached still hands omp the meta-tools
+that register more servers, and that is not a choice to make for every project.
+
+The tools arrive named `mcp__sbx_gateway_<tool>`, so `searxng_web_search` becomes
+`mcp__sbx_gateway_searxng_web_search`. Check what mounted with `/mcp` in a
+session.
+
+`omp-init.sh` writes the server definition into a `--plugin-dir` root under
+`~/.cache` inside the sandbox, not an `mcp.json`. Every config dir omp looks in
+for `mcp.json` is a host mount here, so writing one would leave a URL in the
+shared host config that resolves only inside a sandbox.
+
+Changing `OMP_SBX_MCP_GATEWAY` takes effect on the next launch. Changing
+`omp-init.sh` needs `./build.sh` and `omp --new`.
 
 ### Amazon Bedrock (AWS SSO)
 
