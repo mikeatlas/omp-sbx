@@ -82,6 +82,23 @@ if [ -n "$AWS_SSO_PROFILE" ]; then
       printf 'region = %s\n' "$AWS_SSO_REGION"
     } > "$HOME/.aws/config"
 
+    # The SSO token cache, symlinked into the shared ~/.omp mount rather than
+    # left in this sandbox's own ~/.aws. Its registration lives for about a
+    # month (see aws-sso-nudge.ts), but a fresh sandbox otherwise starts with
+    # an empty cache and demands a new device-code login regardless - sharing
+    # it means a login done once, on the host or in any sandbox, covers every
+    # sandbox until the registration itself actually lapses.
+    #
+    # Both flags matter, for the reason the ~/.omp symlink above does: replace
+    # a real directory rather than nesting a link inside it, and -n covers a
+    # second launch where ~/.aws/sso/cache is already the symlink.
+    SSO_CACHE_SHARED="$HOME/.omp/aws-sso-cache"
+    mkdir -p "$SSO_CACHE_SHARED" "$HOME/.aws/sso"
+    if [ -e "$HOME/.aws/sso/cache" ] && [ ! -L "$HOME/.aws/sso/cache" ]; then
+      rm -rf "$HOME/.aws/sso/cache"
+    fi
+    ln -sfn "$SSO_CACHE_SHARED" "$HOME/.aws/sso/cache"
+
     export AWS_PROFILE="omp-bedrock"
     export AWS_REGION="$AWS_SSO_REGION"
     # The nudge extension needs the SSO profile, not the generated one, to name
@@ -97,19 +114,17 @@ if [ -n "$AWS_SSO_PROFILE" ]; then
       OMP_ARGS+=(--extension "$NUDGE_EXTENSION")
     fi
 
-    # --use-device-code is required, not a preference. The CLI otherwise runs the
-    # PKCE flow, whose redirect_uri is a loopback port inside this sandbox: the
-    # printed URL then sends the host browser to a port nothing listens on. The
-    # device grant instead pairs a URL with a code the user types, so the browser
-    # and the waiting CLI need no shared network.
-    #
-    # A failed login leaves omp running without Bedrock rather than blocking the
-    # session: the rest of the agent still works, and `aws sso login` can be
-    # re-run from a shell inside the sandbox.
+    # Only checks and reports here - it does not run the login itself. A device-
+    # code flow blocks on human approval, which starting this session is the
+    # wrong place to wait on: it stalls -p/one-shot runs outright, and even
+    # interactively it delays the TUI coming up for something the nudge
+    # extension already handles once the session starts (session_start check,
+    # /aws-login, and a relogin on a 401/403 mid-turn).
     if ! aws sts get-caller-identity --profile omp-bedrock >/dev/null 2>&1; then
-      echo "omp-sbx: the AWS SSO login for $AWS_SSO_PROFILE needs renewing. Open the URL below on the host." >&2
-      aws sso login --no-browser --use-device-code --profile "$AWS_SSO_PROFILE" \
-        || echo "omp-sbx: aws sso login failed - Bedrock models stay unavailable this session" >&2
+      echo "omp-sbx: no AWS SSO session for $AWS_SSO_PROFILE yet." >&2
+      echo "omp-sbx: run 'omp-sbx-aws-login' on the host - it opens a real browser and the" >&2
+      echo "omp-sbx: session is shared with every sandbox from then on. Or once this session" >&2
+      echo "omp-sbx: starts, run /aws-login here." >&2
     fi
   fi
 fi

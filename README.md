@@ -61,6 +61,7 @@ omp "fix the bug"      # one-shot prompt
 | MCP gateway | `sbx-kit/omp-init.sh` | Opt-in wiring that connects omp to the sandbox's MCP gateway |
 | Browser CLI | `sbx-kit/Dockerfile` | Installs `agent-browser` (replaces Puppeteer, which can't spawn in sbx) |
 | Bedrock auth | `sbx-kit/omp-init.sh` | Opt-in AWS SSO profile with browserless renewal - see [Amazon Bedrock](#amazon-bedrock-aws-sso) |
+| Bedrock login | `omp-sbx-aws-login` | Host-side SSO login, shared with every sandbox via `~/.omp/aws-sso-cache` |
 | SSO nudge | `sbx-kit/extensions/aws-sso-nudge.ts` | omp extension: warns before the SSO login lapses, adds `/aws-login` |
 
 ### Config sharing
@@ -176,15 +177,29 @@ region = us-east-1
 `~/.omp` is already bind-mounted, so editing `aws-config` takes effect on the
 next session - no rebuild.
 
-**The SSO token lives inside the sandbox, never on the host.** On first launch
-`aws sso login --no-browser --use-device-code` prints a verification URL and
-code; open it on your Mac, enter the code, and the token lands in the sandbox's
-own `~/.aws/sso/cache`. Nothing from your host `~/.aws` is mounted.
+**Log in once, from the host, and every sandbox shares it.** Run:
 
-`--use-device-code` is required here, not a preference. Without it the CLI runs
-the PKCE flow, whose `redirect_uri` is a loopback port inside the sandbox, so the
-URL sends your browser to a port nothing listens on. The device grant pairs a URL
-with a typed code, so the browser and the waiting CLI share no network.
+```bash
+omp-sbx-aws-login
+```
+
+from a project with `OMP_SBX_AWS_PROFILE` set (or `omp-sbx-aws-login --profile
+<name>` anywhere). It opens a real browser - the host has one, unlike a
+sandbox - and writes the resulting SSO token into `~/.omp/aws-sso-cache`, which
+every sandbox symlinks `~/.aws/sso/cache` to. A brand new sandbox, or one
+recreated with `--new`, picks up an already-valid session immediately; nothing
+about the token needs redoing per sandbox.
+
+Unlike `aws-config` above, this directory does hold something live: a
+refreshable SSO session, scoped to the role in that profile. Sharing it is the
+same trust boundary `~/.omp` already carries for everything else in it - one
+identity, shared across this host's own sandboxes.
+
+A sandbox can still log in on its own if you'd rather not leave it: run
+`/aws-login` once the session starts, which the nudge extension below handles
+with a device-code flow (no browser inside the sandbox, so `--use-device-code`
+is required there - the alternative PKCE flow's `redirect_uri` is a loopback
+port nothing listens on). That login is shared too, through the same symlink.
 
 **Renewal is browserless.** `omp-init.sh` generates an `omp-bedrock` profile
 whose `credential_process` calls `aws configure export-credentials`. omp reads
