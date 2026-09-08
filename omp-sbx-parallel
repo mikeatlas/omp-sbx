@@ -256,12 +256,8 @@ remove_worktree_from_workspace() {
 add_worktree_to_workspace "$BRANCH" "$WORKTREE_PATH"
 
 # ── Sandbox name (unique per worktree) ───────────────────────────────────────
-# Same prefix rule as omp-sbx: a repo already named omp-* keeps its own name.
-SANDBOX_SLUG="$(echo "${REPO_BASE}-${BRANCH}" | tr '_' '-' | tr -cd '[:alnum:]_-')"
-case "$SANDBOX_SLUG" in
-  omp|omp-*) SANDBOX_NAME="$SANDBOX_SLUG" ;;
-  *)         SANDBOX_NAME="omp-$SANDBOX_SLUG" ;;
-esac
+# The branch is part of the name, so two worktrees of one repo do not collide.
+SANDBOX_NAME="$(sandbox_name_for "${REPO_BASE}-${BRANCH}")"
 
 # ── Banner ───────────────────────────────────────────────────────────────────
 log ""

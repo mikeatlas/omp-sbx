@@ -57,6 +57,8 @@ omp "fix the bug"      # one-shot prompt
 | Env (experimental) | `sbx-kit/.sbxenv.yaml` + `omp-sbxenv` | Declarative alternative launcher for scripted/CI use — see [Scripted / CI use](#scripted--ci-use-experimental) |
 | Launcher | `omp-sbx` | Wrapper handling banner, sandbox lifecycle, resume vs new |
 | Parallel | `omp-sbx-parallel` | Git worktree-based parallel sandbox launcher |
+| MCP import | `omp-sbx-mcp-import` | Registers Claude Code's MCP servers with sbx - see [MCP servers](#mcp-servers-from-claude-code) |
+| MCP gateway | `sbx-kit/omp-init.sh` | Opt-in wiring that connects omp to the sandbox's MCP gateway |
 | Browser CLI | `sbx-kit/Dockerfile` | Installs `agent-browser` (replaces Puppeteer, which can't spawn in sbx) |
 | Bedrock auth | `sbx-kit/omp-init.sh` | Opt-in AWS SSO profile with browserless renewal - see [Amazon Bedrock](#amazon-bedrock-aws-sso) |
 | SSO nudge | `sbx-kit/extensions/aws-sso-nudge.ts` | omp extension: warns before the SSO login lapses, adds `/aws-login` |
@@ -87,6 +89,64 @@ git push            # uses gh credential helper, no separate token needed
 ```
 
 If `gh auth status` fails with `401`, ensure the GitHub secret is stored (`sbx secret ls`). If it fails because the mount is missing, recreate the sandbox with `omp --new` — mounting is decided once, at launch. On macOS, `hosts.yml` contains no token (it lives in the keychain), so `sbx secret set github` is required.
+
+### MCP servers from Claude Code
+
+```bash
+omp-sbx-mcp-import --dry-run   # read ~/.claude.json, print the plan
+omp-sbx-mcp-import --auth      # register, then authorize the remote ones
+omp-sbx-mcp-import --load      # attach them to this directory's sandbox
+```
+
+sbx keeps its own MCP registry and serves it to a sandbox through a gateway.
+`omp-sbx-mcp-import` copies the servers out of `~/.claude.json` (plus a project
+`.mcp.json`, or any `--file`) into that registry. It is idempotent: a second run
+reports what already exists and changes nothing.
+
+**Why not just mount the Claude config.** Registering is a host-side act, and
+that is the point. A local stdio server runs on the host, and a remote server's
+OAuth flow opens a host browser - so the credential never enters the sandbox,
+which has no keychain and no browser to offer.
+
+**Two ways to reach a sandbox, and they do not mix:**
+
+| Route | Command | Trade |
+|---|---|---|
+| Live attach | `omp-sbx-mcp-import --load` | No restart; the agent also gets the gateway's `mcp-add` / `mcp-find` |
+| Fixed at create | `OMP_SBX_STATIC_MCP=notion,searxng omp-sbx --new` | Set cannot change without `--new`; the agent cannot register more |
+
+Loading into a sandbox created with `--static-mcp` misbehaves - the second load
+appears to replace the first rather than add to it. Pick one route.
+
+**What does not carry over.** `sbx mcp add` has no `--env`, so a server that
+reads its config from the environment gets wrapped in `env VAR=value <command>`.
+The values stay on the host, and the script prints them as `VAR=...` rather than
+echoing a secret. A server whose own binary fails to start on the host fails
+here too, and the attach step reports the reason.
+
+#### Letting omp see them
+
+Registering and attaching gets the servers onto the sandbox's gateway. omp still
+has to connect to it, which a project turns on with one line in its `.env`:
+
+```bash
+OMP_SBX_MCP_GATEWAY=1
+```
+
+Off by default. A gateway with nothing attached still hands omp the meta-tools
+that register more servers, and that is not a choice to make for every project.
+
+The tools arrive named `mcp__sbx_gateway_<tool>`, so `searxng_web_search` becomes
+`mcp__sbx_gateway_searxng_web_search`. Check what mounted with `/mcp` in a
+session.
+
+`omp-init.sh` writes the server definition into a `--plugin-dir` root under
+`~/.cache` inside the sandbox, not an `mcp.json`. Every config dir omp looks in
+for `mcp.json` is a host mount here, so writing one would leave a URL in the
+shared host config that resolves only inside a sandbox.
+
+Changing `OMP_SBX_MCP_GATEWAY` takes effect on the next launch. Changing
+`omp-init.sh` needs `./build.sh` and `omp --new`.
 
 ### Amazon Bedrock (AWS SSO)
 

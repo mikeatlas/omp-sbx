@@ -4,6 +4,7 @@
 # Source this file after colors and log() are defined. It provides:
 #
 #   ensure_sbx "<script-name>"                 install the sbx CLI
+#   sandbox_name_for "<label>"                 sandbox name for a dir or branch
 #   drop_stale_sandbox "<name>" "<kit-dir>"    discard a sandbox whose kit moved
 
 # Fall back to no color if the caller defined only some of them.
@@ -106,6 +107,21 @@ ensure_sbx() {
   log "${C_GREEN}✓ sbx installed and ready${C_RST}"
   log "${C_DIM}Re-run ${script_name} to start.${C_RST}"
   exit 0
+}
+
+# Prints the sandbox name for a label - a directory name, or a repo and branch
+# pair. The omp- prefix groups these in `sbx ls`, and a label already carrying
+# it keeps its own, so ~/src/omp-sbx is omp-sbx rather than omp-omp-sbx.
+#
+# Every launcher and helper has to agree on this, because the name is how they
+# find each other's sandboxes.
+sandbox_name_for() {
+  local slug
+  slug="$(printf '%s' "$1" | tr '_' '-' | tr -cd '[:alnum:]_-')"
+  case "$slug" in
+    omp|omp-*) printf '%s' "$slug" ;;
+    *)         printf 'omp-%s' "$slug" ;;
+  esac
 }
 
 # Removes a sandbox that was created from a different kit directory. Returns 0
