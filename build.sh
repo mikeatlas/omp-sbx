@@ -110,7 +110,7 @@ VERIFY_NAME="omp-verify"
 cleanup_verify() { sbx rm -f "$VERIFY_NAME" 2>/dev/null || true; }
 trap cleanup_verify EXIT
 cleanup_verify
-sbx create -q --kit "${DIR}/sbx-kit" --template "${IMAGE}" --name "$VERIFY_NAME" omp /tmp
+sbx create -q --template "${IMAGE}" --name "$VERIFY_NAME" "${DIR}/sbx-kit" /tmp
 sleep 2
 sbx exec -w /home/agent "$VERIFY_NAME" omp-init.sh --version
 cleanup_verify
