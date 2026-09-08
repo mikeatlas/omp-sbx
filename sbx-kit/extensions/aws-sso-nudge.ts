@@ -187,7 +187,13 @@ export default function (pi: Pi): void {
 		});
 	}
 
-	/** Runs one login at a time, and reports the outcome either way. */
+	/**
+	 * Runs one login at a time, and reports the outcome either way.
+	 *
+	 * The status line carries only this wait, and only while it lasts. A standing
+	 * indicator earns nothing: the registration sits weeks from expiry almost
+	 * always, and the chat warning covers the days that matter.
+	 */
 	async function relogin(ctx: Ctx, reason: string): Promise<void> {
 		if (loggingIn) return;
 		loggingIn = true;
@@ -205,6 +211,7 @@ export default function (pi: Pi): void {
 			}
 		} finally {
 			loggingIn = false;
+			ctx.ui.setStatus(STATUS_KEY, undefined);
 		}
 	}
 
@@ -212,20 +219,16 @@ export default function (pi: Pi): void {
 		if (loggingIn) return;
 
 		if (!(await credentialsWork())) {
-			ctx.ui.setStatus(STATUS_KEY, "aws sso: signed out");
 			await relogin(ctx, "AWS SSO credentials are unavailable.");
 			return;
 		}
 
 		const expiresAt = registrationExpiry();
-		if (expiresAt === null) {
-			// Credentials work, so say nothing about a cache this cannot read.
-			ctx.ui.setStatus(STATUS_KEY, "aws sso: ok");
-			return;
-		}
+		// Credentials work, so there is nothing to warn about from a cache this
+		// cannot read.
+		if (expiresAt === null) return;
 
 		const daysLeft = Math.floor((expiresAt - Date.now()) / 86_400_000);
-		ctx.ui.setStatus(STATUS_KEY, `aws sso: ${daysLeft}d`);
 
 		if (daysLeft <= warnDays()) {
 			if (!warned) {
