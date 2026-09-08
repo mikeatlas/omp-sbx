@@ -120,11 +120,21 @@ if [ -n "$AWS_SSO_PROFILE" ]; then
     # interactively it delays the TUI coming up for something the nudge
     # extension already handles once the session starts (session_start check,
     # /aws-login, and a relogin on a 401/403 mid-turn).
+    #
+    # Interactively, this pauses instead of printing and moving straight on -
+    # the TUI that follows would otherwise scroll the message away before
+    # anyone could read it, let alone act on it. -t 0 keeps -p/one-shot mode
+    # exactly as non-blocking as the comment above promises: no tty, no pause.
     if ! aws sts get-caller-identity --profile omp-bedrock >/dev/null 2>&1; then
       echo "omp-sbx: no AWS SSO session for $AWS_SSO_PROFILE yet." >&2
       echo "omp-sbx: run 'omp-sbx-aws-login' on the host - it opens a real browser and the" >&2
       echo "omp-sbx: session is shared with every sandbox from then on. Or once this session" >&2
       echo "omp-sbx: starts, run /aws-login here." >&2
+      if [ -t 0 ]; then
+        echo "omp-sbx: press Enter to continue without Bedrock, or Ctrl-C to stop here and" >&2
+        echo "omp-sbx: run omp-sbx-aws-login on the host first." >&2
+        read -r _ < /dev/tty || true
+      fi
     fi
   fi
 fi
