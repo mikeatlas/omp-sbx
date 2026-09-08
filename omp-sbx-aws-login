@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+###############################################################################
+# omp-sbx-aws-login - renew the AWS SSO session for Bedrock, from the host.
+#
+#   omp-sbx-aws-login                    profile from this dir's .env
+#   omp-sbx-aws-login --profile <name>   name it explicitly
+#
+# Every sandbox reads its SSO token cache from ~/.omp/aws-sso-cache, shared
+# across all of them. Logging in here - a real browser, no device code - covers
+# every sandbox from then on, until the session's registration itself lapses
+# (about a month). Without this, a freshly created sandbox has an empty cache
+# of its own and would otherwise need a device-code login every time.
+#
+###############################################################################
+set -euo pipefail
+
+SCRIPT_PATH="$0"
+while [ -L "$SCRIPT_PATH" ]; do
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+  SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+  case "$SCRIPT_PATH" in /*) ;; *) SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH" ;; esac
+done
+
+if [ -t 2 ]; then
+  C_DIM=$'\033[2m'; C_CYAN=$'\033[36m'; C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'; C_BOLD=$'\033[1m'; C_RST=$'\033[0m'
+else
+  C_DIM=''; C_CYAN=''; C_GREEN=''; C_YELLOW=''; C_RED=''; C_BOLD=''; C_RST=''
+fi
+log() { printf '%s\n' "$*" >&2; }
+
+env_value() {
+  local key="$1" file="$2" val
+  val="$(sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//p" "$file" | head -1)"
+  val="${val%$'\r'}"
+  val="${val%\"}"; val="${val#\"}"
+  val="${val%\'}"; val="${val#\'}"
+  printf '%s' "$val"
+}
+
+# ── Parse flags ──────────────────────────────────────────────────────────────
+PROFILE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --profile) shift; [ $# -gt 0 ] || { log "${C_RED}--profile needs a name${C_RST}"; exit 1; }
+               PROFILE="$1" ;;
+    -h|--help) awk 'NR>2 && /^#####/ {exit} NR>2 {sub(/^# ?/, ""); print}' "$SCRIPT_PATH"
+               exit 0 ;;
+    *)         log "${C_RED}unknown flag: $1${C_RST}"; exit 1 ;;
+  esac
+  shift
+done
+
+if [ -z "$PROFILE" ] && [ -f "$(pwd)/.env" ]; then
+  PROFILE="$(env_value OMP_SBX_AWS_PROFILE "$(pwd)/.env")"
+fi
+if [ -z "$PROFILE" ]; then
+  log "${C_RED}omp-sbx-aws-login: no profile given and no OMP_SBX_AWS_PROFILE in $(pwd)/.env${C_RST}"
+  log "${C_DIM}Pass --profile <name>, matching a [profile <name>] block in ~/.omp/aws-config${C_RST}"
+  exit 1
+fi
+
+AWS_CONFIG_SRC="$HOME/.omp/aws-config"
+if [ ! -f "$AWS_CONFIG_SRC" ]; then
+  log "${C_RED}omp-sbx-aws-login: no ~/.omp/aws-config - nothing defines profile '$PROFILE'${C_RST}"
+  exit 1
+fi
+if ! grep -q "^\[profile ${PROFILE}\]" "$AWS_CONFIG_SRC"; then
+  log "${C_RED}omp-sbx-aws-login: ~/.omp/aws-config has no [profile ${PROFILE}] block${C_RST}"
+  exit 1
+fi
+
+# ── Merge the profile into this host's own ~/.aws/config ────────────────────
+# Idempotent, and only additive: unlike inside a sandbox (regenerated fresh on
+# every launch), this host's ~/.aws/config is the operator's own and may carry
+# profiles omp-sbx knows nothing about, so this only adds a block if the exact
+# profile is missing - never touches or removes anything else in the file.
+mkdir -p "$HOME/.aws"
+touch "$HOME/.aws/config"
+if ! grep -q "^\[profile ${PROFILE}\]" "$HOME/.aws/config"; then
+  {
+    printf '\n'
+    awk -v p="[profile ${PROFILE}]" '
+      $0 == p { found=1 }
+      found && /^\[/ && $0 != p { exit }
+      found { print }
+    ' "$AWS_CONFIG_SRC"
+  } >> "$HOME/.aws/config"
+  log "${C_DIM}added [profile ${PROFILE}] to ~/.aws/config${C_RST}"
+fi
+
+# ── Share the SSO token cache with every sandbox ─────────────────────────────
+# A real pre-existing cache dir likely holds sessions for other AWS accounts
+# this host uses outside omp-sbx - moved into the shared dir rather than
+# discarded, since a sandbox can only ever use a session whose profile also
+# appears in ~/.omp/aws-config, so anything else just rides along harmlessly.
+SSO_CACHE_SHARED="$HOME/.omp/aws-sso-cache"
+mkdir -p "$SSO_CACHE_SHARED" "$HOME/.aws/sso"
+if [ -e "$HOME/.aws/sso/cache" ] && [ ! -L "$HOME/.aws/sso/cache" ]; then
+  log "${C_DIM}merging existing ~/.aws/sso/cache into the shared dir${C_RST}"
+  cp -n "$HOME/.aws/sso/cache"/*.json "$SSO_CACHE_SHARED"/ 2>/dev/null || true
+  rm -rf "$HOME/.aws/sso/cache"
+fi
+ln -sfn "$SSO_CACHE_SHARED" "$HOME/.aws/sso/cache"
+
+# ── Log in ────────────────────────────────────────────────────────────────────
+# No --use-device-code: this runs on the host, which has a real browser, so
+# the normal PKCE flow's loopback redirect actually has something listening.
+log ""
+log "${C_BOLD}Logging in for '${PROFILE}'${C_RST} ${C_DIM}(opens a browser)${C_RST}"
+if aws sso login --profile "$PROFILE"; then
+  log ""
+  log "${C_GREEN}done - shared via ~/.omp/aws-sso-cache${C_RST}"
+  log "${C_DIM}every sandbox picks this up on its next AWS call, no restart needed${C_RST}"
+else
+  log "${C_RED}omp-sbx-aws-login: login failed${C_RST}"
+  exit 1
+fi
