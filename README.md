@@ -29,6 +29,7 @@ git clone https://github.com/mikeatlas/omp-sbx.git ~/src/github.com/mikeatlas/om
 cd ~/src/github.com/mikeatlas/omp-sbx
 
 # Build + load the template image into sbx
+# (uses docker, or podman if docker isn't installed; OMP_SBX_CONTAINER_CLI=podman forces it)
 ./build.sh
 
 # Symlink the launcher onto your PATH

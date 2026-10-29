@@ -7,6 +7,9 @@
 # you confirm, which buys time for a compromised upstream to be caught:
 #
 #   RELEASE_COOLDOWN_DAYS=0 OMP_VERSION=latest ./build.sh
+#
+# The image builds with docker if it is on PATH, otherwise podman. Set
+# OMP_SBX_CONTAINER_CLI to pick one explicitly.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,6 +27,21 @@ fi
 # shellcheck source=sbx-preflight.sh
 source "$DIR/sbx-preflight.sh"
 ensure_sbx "build.sh"
+
+CONTAINER_CLI="${OMP_SBX_CONTAINER_CLI:-}"
+if [ -z "$CONTAINER_CLI" ]; then
+  if command -v docker >/dev/null 2>&1; then
+    CONTAINER_CLI=docker
+  elif command -v podman >/dev/null 2>&1; then
+    CONTAINER_CLI=podman
+  fi
+fi
+if [ -z "$CONTAINER_CLI" ] || ! command -v "$CONTAINER_CLI" >/dev/null 2>&1; then
+  echo "${C_RED}build.sh needs docker or podman to build the image${C_RST}" >&2
+  [ -n "$CONTAINER_CLI" ] && echo "${C_DIM}  OMP_SBX_CONTAINER_CLI=${CONTAINER_CLI} is not on PATH${C_RST}" >&2
+  exit 1
+fi
+echo ">> using ${CONTAINER_CLI}" >&2
 
 if [ -z "${OMP_VERSION:-}" ]; then
   OMP_VERSION="$OMP_VERSION_PINNED"
@@ -82,21 +100,35 @@ fi
 OMP_VERSION="${OMP_VERSION:?could not determine OMP_VERSION}"
 IMAGE="${OMP_SBX_IMAGE:-omp-sbx:latest}"
 
+# Qualify the tag the way Docker does. podman otherwise names it
+# localhost/omp-sbx:latest, the tar carries that name into sbx, and
+# `--template omp-sbx:latest` no longer finds it.
+case "$IMAGE" in
+  */*)
+    first="${IMAGE%%/*}"
+    case "$first" in
+      *.*|*:*|localhost) BUILD_TAG="$IMAGE" ;;
+      *) BUILD_TAG="docker.io/${IMAGE}" ;;
+    esac
+    ;;
+  *) BUILD_TAG="docker.io/library/${IMAGE}" ;;
+esac
+
 echo ">> building ${IMAGE} (omp v${OMP_VERSION})"
-docker build \
+"$CONTAINER_CLI" build \
   --build-arg "OMP_VERSION=${OMP_VERSION}" \
-  -t "${IMAGE}" \
+  -t "${BUILD_TAG}" \
   -f "${DIR}/sbx-kit/Dockerfile" \
   "${DIR}"
 
 echo ">> saving + loading into sbx runtime"
-docker image save "${IMAGE}" -o /tmp/omp-sbx.tar
+"$CONTAINER_CLI" image save "${BUILD_TAG}" -o /tmp/omp-sbx.tar
 if ! sbx template load /tmp/omp-sbx.tar; then
   if [ -t 2 ]; then C_BRED=$'\033[1;31m'; C_RST=$'\033[0m'; else C_BRED=''; C_RST=''; fi
   echo "" >&2
   echo "${C_BRED}ERROR: sbx template load failed.${C_RST}" >&2
   echo "${C_BRED}If the error mentions '401 Unauthorized' or 'no valid user session',${C_RST}" >&2
-  echo "${C_BRED}you are not authenticated to Docker/sbx. Run:${C_RST}" >&2
+  echo "${C_BRED}you are not authenticated to sbx. Run:${C_RST}" >&2
   echo "" >&2
   echo "  sbx login" >&2
   echo "" >&2

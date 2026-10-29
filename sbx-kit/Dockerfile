@@ -10,7 +10,7 @@
 # Build and load with ./build.sh.
 ###############################################################################
 
-FROM docker/sandbox-templates:shell-nightly
+FROM docker.io/docker/sandbox-templates:shell-nightly
 
 USER root
 
